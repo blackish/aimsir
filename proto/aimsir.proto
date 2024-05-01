@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "io.grpc.aimsir";
+option java_outer_classname = "AimsirProto";
+
+package aimsir;
+
+// Peer update definition
+enum PeerUpdateType {
+  Add = 0;
+  Remove = 1;
+}
+
+message Peer {
+  string id = 1;
+  string ipaddress = 2;
+}
+
+message PeerUpdate {
+  PeerUpdateType update_type = 1;
+  repeated Peer update = 2;
+}
+
+message PeerInfo {
+  string id = 1;
+}
+
+// Metric definition
+enum MetricType {
+  PL = 0;
+  Jitter = 1;
+}
+
+message Metric {
+  MetricType metric_type = 1;
+  string peer_id = 2;
+  float value = 3;
+}
+
+message MetricResponse {
+  bool ok = 1;
+}
+
+service AimsirService {
+  rpc Metrics(stream Metric) returns (MetricResponse) {}
+  rpc Register(PeerInfo) returns (stream PeerUpdate) {}
+}
