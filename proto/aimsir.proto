@@ -19,23 +19,28 @@ message Peer {
 
 message PeerUpdate {
   PeerUpdateType update_type = 1;
-  repeated Peer update = 2;
-}
-
-message PeerInfo {
-  string id = 1;
+  uint32 probe_interval = 2;
+  uint32 aggregate_interval = 3;
+  repeated Peer update = 4;
 }
 
 // Metric definition
 enum MetricType {
   PL = 0;
-  Jitter = 1;
+  JitterStdDev = 1;
+  JitterMin = 2;
+  JitterMax = 3;
 }
 
 message Metric {
   MetricType metric_type = 1;
   string peer_id = 2;
-  float value = 3;
+  string local_id = 3;
+  float value = 4;
+}
+
+message MetricMessage {
+  repeated Metric metric = 1;
 }
 
 message MetricResponse {
@@ -43,6 +48,6 @@ message MetricResponse {
 }
 
 service AimsirService {
-  rpc Metrics(stream Metric) returns (MetricResponse) {}
-  rpc Register(PeerInfo) returns (stream PeerUpdate) {}
+  rpc Metrics(stream MetricMessage) returns (MetricResponse) {}
+  rpc Register(Peer) returns (stream PeerUpdate) {}
 }
