@@ -180,9 +180,10 @@ impl PeerController {
                         match mgr_msg.update_type {
                             model::UpdateType::Add => {
                                 for key in mgr_msg.update {
-                                    if !self.peers.contains_key(&key.id) {
-                                        self.peers.insert(
-                                            key.id.clone(),
+                                    self.peers
+                                        .entry(key.id.clone())
+                                        .and_modify(|x| x.peer.ipaddress=key.ipaddress.clone())
+                                        .or_insert(
                                             model::Neighbour {
                                                 peer: model::aimsir::Peer {
                                                     id: key.id,
@@ -193,7 +194,6 @@ impl PeerController {
                                                 last_seen: 0
                                             }
                                         );
-                                    }
                                 }
                             }
                             model::UpdateType::Remove => {

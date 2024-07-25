@@ -48,18 +48,21 @@ impl ManagerController {
                 metric_composer(local_id, meas_rx, send_client).await
             }
         );
-        log::info!("Registering on the server");
-        let clients = client.register(
-            Request::new(
-                aimsir::Peer{
-                    id: id.to_string(),
-                    ipaddress: ipaddress.to_string()
-                }
-            )
-        ).await?.into_inner();
         handles.spawn(async move {
-            log::info!("Spawning update processor");
-            update_processor(peer_tx, clients).await
+            loop {
+                log::info!("Registering on the server");
+                if let Ok(clients) = client.register(
+                    Request::new(
+                        aimsir::Peer{
+                            id: id.to_string(),
+                            ipaddress: ipaddress.to_string()
+                        }
+                    )
+                ).await {
+                    log::info!("Spawning update processor");
+                    update_processor(peer_tx.clone(), clients.into_inner()).await
+                }
+            }
         });
         Ok(
             Self{
@@ -67,6 +70,7 @@ impl ManagerController {
             }
         )
     }
+
     pub async fn worker(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         while let Some(res) = self.handles.join_next().await {
             let out = res?;
@@ -131,6 +135,7 @@ async fn metric_composer(local_id: String, mut meas_rx: Receiver<Vec<model::Meas
         }
     }
 }
+
 async fn update_processor(peer_tx: Sender<model::NeighbourUpdate>, mut client: Streaming<model::aimsir::PeerUpdate>) {
     loop {
         if let Ok(peer_update) = client.message().await {

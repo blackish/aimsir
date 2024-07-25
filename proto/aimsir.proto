@@ -47,7 +47,13 @@ message MetricResponse {
   bool ok = 1;
 }
 
+message PeerResponse {
+  bool ok = 1;
+}
+
 service AimsirService {
   rpc Metrics(stream MetricMessage) returns (MetricResponse) {}
   rpc Register(Peer) returns (stream PeerUpdate) {}
+  rpc AddPeer(Peer) returns (PeerResponse) {}
+  rpc RemovePeer(Peer) returns (PeerResponse) {}
 }
