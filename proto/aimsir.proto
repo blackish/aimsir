@@ -10,6 +10,7 @@ package aimsir;
 enum PeerUpdateType {
   Add = 0;
   Remove = 1;
+  Full = 2;
 }
 
 message Peer {

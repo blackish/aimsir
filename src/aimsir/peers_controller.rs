@@ -178,6 +178,23 @@ impl PeerController {
                     if let Some(mgr_msg) = res {
                         log::debug!("Got peer update");
                         match mgr_msg.update_type {
+                            model::UpdateType::Full => {
+                                _ = self.peers.drain();
+                                for key in mgr_msg.update {
+                                    self.peers.insert(key.id.clone(),
+                                            model::Neighbour {
+                                                peer: model::aimsir::Peer {
+                                                    id: key.id,
+                                                    ipaddress: key.ipaddress
+                                                },
+                                                last_seq: 0,
+                                                last_latency: u64::MAX,
+                                                last_seen: 0
+                                            }
+                                        );
+                                }
+                
+                            }
                             model::UpdateType::Add => {
                                 for key in mgr_msg.update {
                                     self.peers

@@ -2,7 +2,13 @@ use clap;
 use log;
 use simple_logger;
 use std::net::SocketAddr;
-use aimsir::{self, model::aimsir::aimsir_service_server::AimsirServiceServer};
+use aimsir::{
+    self,
+    model::{
+        self,
+        aimsir::aimsir_service_server::AimsirServiceServer,
+    },
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -45,6 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let aimsir_server = aimsir::server_manager::ServerController::new(
         *app.get_one::<u32>("interval").expect("Expect u32 interval"),
         *app.get_one::<u32>("aggregate").expect("Expect u32 aggregate interval"),
+        Box::new(model::db::SqliteDb::new("test".to_string())?),
     ).await?;
     let server = AimsirServiceServer::new(aimsir_server);
     let _ = tonic::transport::Server::builder().add_service(server).serve(node_ip).await;

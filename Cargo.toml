@@ -20,6 +20,8 @@ path = "src/aimsir/mod.rs"
 [dependencies]
 async-stream = "0.3.5"
 clap = "4.5.4"
+diesel = { version = "2.2.2", features = ["mysql", "sqlite"] }
+dotenv = "0.15.0"
 flexbuffers = "2.0.0"
 futures = "0.3.30"
 log = "0.4.21"

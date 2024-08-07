@@ -206,6 +206,18 @@ mod tests {
             });
             Ok(tonic::Response::new(ReceiverStream::new(rx)))
         }
+        async fn add_peer(
+            &self,
+            _request: tonic::Request<model::aimsir::Peer>,
+        ) -> std::result::Result<tonic::Response<model::aimsir::PeerResponse>, tonic::Status>{
+            Ok(tonic::Response::new(model::aimsir::PeerResponse{ok: true}))
+        }
+        async fn remove_peer(
+            &self,
+            _request: tonic::Request<model::aimsir::Peer>,
+        ) -> std::result::Result<tonic::Response<model::aimsir::PeerResponse>, tonic::Status>{
+            Ok(tonic::Response::new(model::aimsir::PeerResponse{ok: true}))
+        }
 
     }
     #[tokio::test]

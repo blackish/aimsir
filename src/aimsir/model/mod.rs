@@ -1,6 +1,9 @@
 pub mod aimsir {
     tonic::include_proto!("aimsir");
 }
+pub mod db;
+use diesel::prelude::*;
+use std::{time::{SystemTime, UNIX_EPOCH}, u32};
 use serde::{Serialize, Deserialize};
 
 pub struct Neighbour {
@@ -13,7 +16,8 @@ pub struct Neighbour {
 // internal messages
 pub enum UpdateType {
     Add,
-    Remove
+    Remove,
+    Full,
 }
 
 impl UpdateType {
@@ -24,6 +28,9 @@ impl UpdateType {
             },
             1 => {
                 Some(UpdateType::Remove)
+            },
+            2 => {
+                Some(UpdateType::Full)
             },
             _ => {
                 None
@@ -60,3 +67,54 @@ pub struct Probe {
     pub seq: u64,
     pub ts: u64
 }
+
+#[derive(Clone,Debug)]
+pub struct StoreMetric {
+    pub ts: u64,
+    pub pl: u32,
+    pub jitter_stddev: f32,
+    pub jitter_min: f32,
+    pub jitter_max: f32
+}
+
+impl StoreMetric {
+    pub fn new(metric: aimsir::Metric) -> Self {
+        let ts = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64;
+        let mut new_metric = Self{ts, pl: 0, jitter_min: -1.0, jitter_max: -1.0, jitter_stddev: -1.0, };
+        new_metric.update(metric);
+        new_metric
+    }
+    pub fn update(&mut self, metric: aimsir::Metric) {
+        self.ts = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64;
+        match aimsir::MetricType::try_from(metric.metric_type) {
+            Ok(aimsir::MetricType::Pl) => {
+                self.pl = metric.value as u32
+            },
+            Ok(aimsir::MetricType::JitterMin) => {
+                self.jitter_min = metric.value
+            },
+            Ok(aimsir::MetricType::JitterMax) => {
+                self.jitter_max = metric.value
+            },
+            Ok(aimsir::MetricType::JitterStdDev) => {
+                self.jitter_stddev = metric.value
+            },
+            _ => {}
+        }
+    }
+}
+
+// #[derive(Queryable, Selectable)]
+#[derive(Insertable, Queryable, Selectable)]
+#[diesel(table_name = crate::schema::peers)]
+pub struct Peer {
+    pub peer_id: String,
+    pub name: String,
+}
+
