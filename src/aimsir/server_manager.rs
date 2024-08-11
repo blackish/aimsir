@@ -364,6 +364,7 @@ mod tests {
         ).unwrap();
         let db = Box::new(model::db::SqliteDb::new("sqlite://diesel.sqlite".to_string()).unwrap());
         let server = ServerController::new(1, 60, db).await.unwrap();
+        local_db.del_peer("0".into()).unwrap();
         let received_metrics = server.get_metrics();
         let node_ip: SocketAddr = "127.0.0.1:10000".parse().unwrap();
         let server = AimsirServiceServer::new(server);
