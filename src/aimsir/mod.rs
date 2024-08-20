@@ -4,3 +4,4 @@ pub mod server_manager;
 pub mod peers_controller;
 pub mod model;
 pub mod schema;
+pub mod backend_manager;

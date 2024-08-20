@@ -87,6 +87,10 @@ impl StoreMetric {
         new_metric.update(metric);
         new_metric
     }
+    pub fn new_empty() -> Self {
+        let new_metric = Self{ts: 0, pl: 0, jitter_min: -1.0, jitter_max: -1.0, jitter_stddev: -1.0, };
+        new_metric
+    }
     pub fn update(&mut self, metric: aimsir::Metric) {
         self.ts = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -110,7 +114,6 @@ impl StoreMetric {
     }
 }
 
-// #[derive(Queryable, Selectable)]
 #[derive(Insertable, Queryable, Selectable)]
 #[diesel(table_name = crate::schema::peers)]
 pub struct Peer {
@@ -118,3 +121,25 @@ pub struct Peer {
     pub name: String,
 }
 
+#[derive(Insertable, Queryable, Selectable, Clone)]
+#[diesel(table_name = crate::schema::tags)]
+pub struct Tag {
+    pub id: i32,
+    pub level: i32,
+    pub name: String,
+}
+
+#[derive(Insertable, Queryable, Selectable)]
+#[diesel(table_name = crate::schema::tag_levels)]
+pub struct TagLevel {
+    pub id: i32,
+    pub parent: Option<i32>,
+    pub name: String,
+}
+
+#[derive(Insertable, Queryable, Selectable)]
+#[diesel(table_name = crate::schema::peer_tags)]
+pub struct PeerTag {
+    pub peer_id: String,
+    pub tag_id: i32,
+}

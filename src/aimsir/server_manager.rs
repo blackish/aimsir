@@ -398,8 +398,8 @@ mod tests {
         );
         client.metrics(metrics).await.unwrap();
         let unwrapped_metrics = received_metrics.read().await;
-        if let Some(peer) = unwrapped_metrics.get("0".into()) {
-            if let Some(store_metric) = peer.get("1".into()) {
+        if let Some(peer) = unwrapped_metrics.get(&String::from("0")) {
+            if let Some(store_metric) = peer.get(&String::from("1")) {
                 assert_eq!(
                     store_metric.pl,
                     0,
