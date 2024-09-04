@@ -1,67 +1,84 @@
-use crate::schema;
 use crate::model;
-use diesel::ExpressionMethods;
-use diesel::{
-    self,
-    query_dsl::methods::SelectDsl,
-    Connection,
-    RunQueryDsl,
-    SelectableHelper
-};
 
-pub trait Db {
-    fn get_peers(&mut self) -> Result<Vec::<model::Peer>, Box<dyn std::error::Error>>;
-    fn get_tags(&mut self) -> Result<Vec::<model::Tag>, Box<dyn std::error::Error>>;
-    fn get_tag_levels(&mut self) -> Result<Vec::<model::TagLevel>, Box<dyn std::error::Error>>;
-    fn get_peer_tags(&mut self) -> Result<Vec::<model::PeerTag>, Box<dyn std::error::Error>>;
-    fn add_peer(&mut self, peer: model::Peer) -> Result<(), Box<dyn std::error::Error>>;
-    fn del_peer(&mut self, peer_id: String) -> Result<(), Box<dyn std::error::Error>>;
+use sqlx::{query_as, query};
+use tonic::async_trait;
+
+#[async_trait]
+pub trait Db: Send + Sync {
+    async fn get_peers(&mut self) -> Result<Vec::<model::Peer>, sqlx::Error>;
+    async fn get_tags(&mut self) -> Result<Vec::<model::Tag>, sqlx::Error>;
+    async fn get_tag_levels(&mut self) -> Result<Vec::<model::TagLevel>, sqlx::Error>;
+    async fn get_peer_tags(&mut self) -> Result<Vec::<model::PeerTag>, sqlx::Error>;
+    async fn add_peer(&mut self, peer: model::Peer) -> Result<(), sqlx::Error>;
+    async fn del_peer(&mut self, peer_id: String) -> Result<(), sqlx::Error>;
 }
 
 pub struct SqliteDb {
-    conn: diesel::SqliteConnection,
+    conn: sqlx::SqlitePool,
 }
 
 impl SqliteDb {
-    pub fn new(database_url: String) -> Result<Self, Box<dyn std::error::Error>> {
-        let conn = diesel::sqlite::SqliteConnection::establish(&database_url)?;
+    pub async fn new(database_url: String) -> Result<Self, Box<dyn std::error::Error>> {
+        let conn = sqlx::SqlitePool::connect(&database_url).await?;
         Ok(Self {conn})
     }
 }
 
+#[async_trait]
 impl Db for SqliteDb {
-    fn get_peers(&mut self) -> Result<Vec::<model::Peer>, Box<dyn std::error::Error>> {
-        let results = schema::peers::dsl::peers.select(model::Peer::as_select()).load(&mut self.conn)?;
+    async fn get_peers(&mut self) -> Result<Vec::<model::Peer>, sqlx::Error> {
+        let results = query_as!(
+            model::Peer,
+            "SELECT * FROM peers",
+        )
+            .fetch_all(&self.conn)
+        .await?;
         Ok(results)
     }
-    fn get_tags(&mut self) -> Result<Vec::<model::Tag>, Box<dyn std::error::Error>> {
-        let results = schema::tags::dsl::tags
-            .select(model::Tag::as_select())
-            .load(&mut self.conn)?;
+    async fn get_tags(&mut self) -> Result<Vec::<model::Tag>, sqlx::Error> {
+        let results = query_as!(
+            model::Tag,
+            "SELECT * FROM tags",
+        )
+            .fetch_all(&self.conn)
+        .await?;
         Ok(results)
     }
-    fn get_tag_levels(&mut self) -> Result<Vec::<model::TagLevel>, Box<dyn std::error::Error>> {
-        let results = schema::tag_levels::dsl::tag_levels
-            .select(model::TagLevel::as_select())
-            .load(&mut self.conn)?;
+    async fn get_tag_levels(&mut self) -> Result<Vec::<model::TagLevel>, sqlx::Error> {
+        let results = query_as!(
+            model::TagLevel,
+            "SELECT * FROM tag_levels",
+        )
+            .fetch_all(&self.conn)
+        .await?;
         Ok(results)
     }
-    fn get_peer_tags(&mut self) -> Result<Vec::<model::PeerTag>, Box<dyn std::error::Error>> {
-        let results = schema::peer_tags::dsl::peer_tags
-            .select(model::PeerTag::as_select())
-            .load(&mut self.conn)?;
+    async fn get_peer_tags(&mut self) -> Result<Vec::<model::PeerTag>, sqlx::Error> {
+        let results = query_as!(
+            model::PeerTag,
+            "SELECT * FROM peer_tags",
+        )
+            .fetch_all(&self.conn)
+        .await?;
         Ok(results)
     }
-    fn add_peer(&mut self, peer: model::Peer) -> Result<(), Box<dyn std::error::Error>> {
-        diesel::insert_into(schema::peers::table)
-           .values(peer)
-            .execute(&mut self.conn)?;
+    async fn add_peer(&mut self, peer: model::Peer) -> Result<(), sqlx::Error> {
+        let _results = query!(
+            "INSERT INTO peers VALUES ($1, $2)",
+            peer.peer_id,
+            peer.name
+        )
+            .execute(&self.conn)
+        .await?;
         Ok(())
     }
-    fn del_peer(&mut self, peer_id: String) -> Result<(), Box<dyn std::error::Error>> {
-        diesel::delete(schema::peers::table)
-            .filter(schema::peers::peer_id.eq(peer_id))
-            .execute(&mut self.conn)?;
+    async fn del_peer(&mut self, peer_id: String) -> Result<(), sqlx::Error> {
+        let _results = query!(
+            "DELETE FROM peers WHERE peer_id = $1",
+            peer_id,
+        )
+            .execute(&self.conn)
+        .await?;
         Ok(())
     }
 }

@@ -27,7 +27,7 @@ impl ServerController {
         let clients = Arc::new(
             RwLock::new(
                 // clients
-                db.get_peers()?.into_iter().map(|x| {aimsir::Peer{id: x.peer_id, ipaddress: "".into()}}).collect()
+                db.get_peers().await?.into_iter().map(|x| {aimsir::Peer{id: x.peer_id, ipaddress: "".into()}}).collect()
             )
         );
         let new_server = ServerController{
@@ -237,7 +237,7 @@ mod tests {
     #[tokio::test]
     async fn test_connect_nonexisting_peer() {
         let _ = env_logger::try_init();
-        let db = Box::new(model::db::SqliteDb::new("sqlite://diesel.sqlite".to_string()).unwrap());
+        let db = Box::new(model::db::SqliteDb::new("sqlite://diesel.sqlite".to_string()).await.unwrap());
         let server = ServerController::new(1, 60, db).await.unwrap();
         let node_ip: SocketAddr = "127.0.0.1:10000".parse().unwrap();
         let server = AimsirServiceServer::new(server);
@@ -260,14 +260,14 @@ mod tests {
     #[tokio::test]
     async fn test_connect_existing_peer() {
         let _ = env_logger::try_init();
-        let mut local_db = model::db::SqliteDb::new("sqlite://diesel.sqlite".to_string()).unwrap();
+        let mut local_db = model::db::SqliteDb::new("sqlite://diesel.sqlite".to_string()).await.unwrap();
         local_db.add_peer(
             model::Peer{
                 peer_id: "0".into(),
                 name: "noname".into(),
             }
-        ).unwrap();
-        let db = Box::new(model::db::SqliteDb::new("sqlite://diesel.sqlite".to_string()).unwrap());
+        ).await.unwrap();
+        let db = Box::new(model::db::SqliteDb::new("sqlite://diesel.sqlite".to_string()).await.unwrap());
         let server = ServerController::new(1, 60, db).await.unwrap();
         let node_ip: SocketAddr = "127.0.0.1:10000".parse().unwrap();
         let server = AimsirServiceServer::new(server);
@@ -315,7 +315,7 @@ mod tests {
                 let _ = full_tx.send(message.unwrap()).await;
             }
         });
-        local_db.del_peer("0".into()).unwrap();
+        local_db.del_peer("0".into()).await.unwrap();
         if let Some(message) = full_rx.recv().await {
             assert_eq!(
                 message,
@@ -355,16 +355,16 @@ mod tests {
     #[tokio::test]
     async fn test_metrics() {
         let _ = env_logger::try_init();
-        let mut local_db = model::db::SqliteDb::new("sqlite://diesel.sqlite".to_string()).unwrap();
+        let mut local_db = model::db::SqliteDb::new("sqlite://diesel.sqlite".to_string()).await.unwrap();
         local_db.add_peer(
             model::Peer{
                 peer_id: "0".into(),
                 name: "noname".into(),
             }
-        ).unwrap();
-        let db = Box::new(model::db::SqliteDb::new("sqlite://diesel.sqlite".to_string()).unwrap());
+        ).await.unwrap();
+        let db = Box::new(model::db::SqliteDb::new("sqlite://diesel.sqlite".to_string()).await.unwrap());
         let server = ServerController::new(1, 60, db).await.unwrap();
-        local_db.del_peer("0".into()).unwrap();
+        local_db.del_peer("0".into()).await.unwrap();
         let received_metrics = server.get_metrics();
         let node_ip: SocketAddr = "127.0.0.1:10000".parse().unwrap();
         let server = AimsirServiceServer::new(server);

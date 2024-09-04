@@ -2,7 +2,6 @@ pub mod aimsir {
     tonic::include_proto!("aimsir");
 }
 pub mod db;
-use diesel::prelude::*;
 use std::{time::{SystemTime, UNIX_EPOCH}, u32};
 use serde::{Serialize, Deserialize};
 
@@ -68,7 +67,7 @@ pub struct Probe {
     pub ts: u64
 }
 
-#[derive(Clone,Debug)]
+#[derive(Clone,Debug, Serialize)]
 pub struct StoreMetric {
     pub ts: u64,
     pub pl: u32,
@@ -114,32 +113,28 @@ impl StoreMetric {
     }
 }
 
-#[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::peers)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Peer {
     pub peer_id: String,
     pub name: String,
 }
 
-#[derive(Insertable, Queryable, Selectable, Clone)]
-#[diesel(table_name = crate::schema::tags)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Tag {
-    pub id: i32,
-    pub level: i32,
+    pub id: i64,
+    pub level: i64,
     pub name: String,
 }
 
-#[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::tag_levels)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct TagLevel {
-    pub id: i32,
-    pub parent: Option<i32>,
+    pub id: i64,
+    pub parent: Option<i64>,
     pub name: String,
 }
 
-#[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::peer_tags)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct PeerTag {
     pub peer_id: String,
-    pub tag_id: i32,
+    pub tag_id: i64,
 }

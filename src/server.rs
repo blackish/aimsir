@@ -1,20 +1,34 @@
+use std::sync::Arc;
+use std::collections::HashMap;
+use tokio::sync::RwLock;
 use clap;
 use log;
 use simple_logger;
 use std::net::SocketAddr;
+use tokio::net::TcpListener;
+use axum::{Router, routing::get};
 use aimsir::{
     self,
+    backend_manager::BackendState,
     model::{
         self,
         aimsir::aimsir_service_server::AimsirServiceServer,
-    },
+    }
+};
+use aimsir::backend_manager::{
+    stats,
+    stats_id,
+    render_results,
 };
 
 #[tokio::main]
+// #[rocket::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = clap::Command::new("aimsir-server")
         .version("0.0.1")
         .arg(clap::arg!(ip: -p --ip <ip> "node local ip")
+            .required(true))
+        .arg(clap::arg!(webip: -w --web-ip <webip> "node web ui local ip")
             .required(true))
         .arg(clap::arg!(interval: -i --interval <interval> "probe interval")
             .required(true)
@@ -48,12 +62,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let node_ip: SocketAddr = app.get_one::<String>("ip").unwrap().as_str().parse().unwrap();
+    let web_ip: SocketAddr = app.get_one::<String>("webip").unwrap().as_str().parse().unwrap();
     let aimsir_server = aimsir::server_manager::ServerController::new(
         *app.get_one::<u32>("interval").expect("Expect u32 interval"),
         *app.get_one::<u32>("aggregate").expect("Expect u32 aggregate interval"),
-        Box::new(model::db::SqliteDb::new("test".to_string())?),
+        Box::new(model::db::SqliteDb::new("test".to_string()).await?),
     ).await?;
+
+    let input_metrics = aimsir_server.get_metrics();
+    let parse_db = Box::new(model::db::SqliteDb::new("test".to_string()).await?);
+    let metrics = Arc::new(RwLock::new(HashMap::new()));
+    let reconcile_time: u16 = 60;
+
     let server = AimsirServiceServer::new(aimsir_server);
-    let _ = tonic::transport::Server::builder().add_service(server).serve(node_ip).await;
+    tokio::spawn(async move {
+        let _ = tonic::transport::Server::builder().add_service(server).serve(node_ip).await;
+    });
+    // let web_ip: SocketAddr = app.get_one::<String>("webip").unwrap().as_str().parse().unwrap();
+    let web_app = Router::new()
+        .route("/stats", get(stats))
+        .route("/stats/:statid", get(stats_id))
+        .with_state(
+            BackendState{
+                metrics: metrics.clone(),
+                db: Arc::new(RwLock::new(model::db::SqliteDb::new("test".to_string()).await?)),
+            });
+    tokio::spawn(async move {
+        let _ = render_results(
+            input_metrics,
+            parse_db,
+            reconcile_time,
+            metrics,
+        ).await;
+    });
+    let listener = TcpListener::bind(web_ip).await.unwrap();
+    axum::serve(listener, web_app).await.unwrap();
     Ok(())
 }
