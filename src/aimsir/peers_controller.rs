@@ -1,21 +1,21 @@
 use log;
 use std::{
-    time::{SystemTime, UNIX_EPOCH},
     collections::HashMap,
-    sync::Arc
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::{
-    sync::mpsc::{Receiver, Sender, channel},
     net::UdpSocket,
+    select,
+    sync::mpsc::{channel, Receiver, Sender},
     time::{self, Duration},
-    select
 };
 
-use serde::{self, Serialize, Deserialize};
 use flexbuffers::{FlexbufferSerializer, Reader};
+use serde::{self, Deserialize, Serialize};
 
-use crate::model;
 use crate::constants;
+use crate::model;
 
 pub struct PeerController {
     probe_timer: u64,
@@ -25,7 +25,7 @@ pub struct PeerController {
     peer_sender: Sender<model::PeerUpdate>,
     manager_receiver: Receiver<model::NeighbourUpdate>,
     manager_sender: Sender<Vec<model::Measurement>>,
-    test: bool
+    test: bool,
 }
 
 fn make_peer_list(peers: &HashMap<String, model::Neighbour>) -> Vec<String> {
@@ -43,7 +43,7 @@ impl PeerController {
         aggregate_timer: u64,
         mgr_rcv: Receiver<model::NeighbourUpdate>,
         mgr_send: Sender<Vec<model::Measurement>>,
-        test: bool
+        test: bool,
     ) -> Self {
         let (tx, mut rx) = channel::<model::PeerUpdate>(2);
         let (receiver_tx, receiver_rx) = channel::<model::Probe>(1_024);
@@ -74,7 +74,7 @@ impl PeerController {
                                             .duration_since(UNIX_EPOCH)
                                             .unwrap()
                                             .as_millis() as u64;
-                    
+
                                 let probe = model::Probe {
                                     id: id.to_string(),
                                     seq: seq.clone(),
@@ -97,7 +97,7 @@ impl PeerController {
             tokio::spawn(async move {
                 let mut buf = [0; 1024];
                 loop {
-                    let(len, addr) = udp_receiver.recv_from(&mut buf).await.unwrap();
+                    let (len, addr) = udp_receiver.recv_from(&mut buf).await.unwrap();
                     log::debug!("Got a package from {}", addr);
                     if let Ok(reader) = Reader::get_root(&buf[..len]) {
                         if let Ok(probe) = model::Probe::deserialize(reader) {
@@ -116,12 +116,15 @@ impl PeerController {
             peer_sender: tx,
             manager_receiver: mgr_rcv,
             manager_sender: mgr_send,
-            test
+            test,
         }
     }
     pub async fn work(&mut self) {
         let mut peer_stats: HashMap<String, model::Measurement> = HashMap::new();
-        let mut last_aggregate_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        let mut last_aggregate_ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
         let mut aggregate_timer = time::interval(Duration::from_secs(self.aggregate_timer));
         let _ = aggregate_timer.tick().await;
         loop {
@@ -193,7 +196,7 @@ impl PeerController {
                                             }
                                         );
                                 }
-                
+
                             }
                             model::UpdateType::Add => {
                                 for key in mgr_msg.update {
@@ -242,20 +245,24 @@ impl PeerController {
             }
         }
     }
-    pub fn make_aggregate(&self, peer_stats: &mut HashMap<String, model::Measurement>, ts: u64) -> Vec<model::Measurement> {
+    pub fn make_aggregate(
+        &self,
+        peer_stats: &mut HashMap<String, model::Measurement>,
+        ts: u64,
+    ) -> Vec<model::Measurement> {
         let mut result = Vec::new();
         for peer in self.peers.values() {
             let last_stat_ts = (ts as u64 - peer.last_seen) / (1000 * self.probe_timer);
-            let mut stat = peer_stats.remove(&peer.peer.id).unwrap_or(
-                            model::Measurement {
-                                id: peer.peer.id.clone().into(),
-                                count: 0,
-                                pl: 0,
-                                jitter_stddev: 0.0,
-                                jitter_min: 0.0,
-                                jitter_max: 0.0
-                            }
-                        );
+            let mut stat = peer_stats
+                .remove(&peer.peer.id)
+                .unwrap_or(model::Measurement {
+                    id: peer.peer.id.clone().into(),
+                    count: 0,
+                    pl: 0,
+                    jitter_stddev: 0.0,
+                    jitter_min: 0.0,
+                    jitter_max: 0.0,
+                });
             if last_stat_ts > 0 {
                 stat.pl += last_stat_ts as u64;
             }
@@ -271,39 +278,34 @@ impl PeerController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::{
-        self,
-        sync::mpsc
-    };
+    use tokio::{self, sync::mpsc};
 
     #[test]
     fn test_make_peer_list() {
         let mut neighbour_hashmap: HashMap<String, model::Neighbour> = HashMap::new();
         neighbour_hashmap.insert(
             String::from("id1"),
-            model::Neighbour{
-                peer: model::aimsir::Peer{
+            model::Neighbour {
+                peer: model::aimsir::Peer {
                     id: String::from("id1"),
-                    ipaddress: String::from("192.168.1.1")
+                    ipaddress: String::from("192.168.1.1"),
                 },
                 last_seq: 0,
                 last_latency: 0,
-                last_seen: 0
-
-            }
+                last_seen: 0,
+            },
         );
         neighbour_hashmap.insert(
             String::from("id2"),
-            model::Neighbour{
-                peer: model::aimsir::Peer{
+            model::Neighbour {
+                peer: model::aimsir::Peer {
                     id: "id2".into(),
-                    ipaddress: "192.168.1.2".into()
+                    ipaddress: "192.168.1.2".into(),
                 },
                 last_seq: 0,
                 last_latency: 0,
-                last_seen: 0
-
-            }
+                last_seen: 0,
+            },
         );
         let neighbour_list = make_peer_list(&neighbour_hashmap);
         let mut target_list = HashMap::new();
@@ -320,22 +322,18 @@ mod tests {
         let _ = env_logger::try_init();
         let (tx, rx) = mpsc::channel(1);
         let (mgr_tx, mut mgr_rx) = mpsc::channel(1);
-        let neighbour = model::aimsir::Peer{id: "0".into(), ipaddress: "127.0.0.1".into()};
-        let neighbour_update = model::NeighbourUpdate{
+        let neighbour = model::aimsir::Peer {
+            id: "0".into(),
+            ipaddress: "127.0.0.1".into(),
+        };
+        let neighbour_update = model::NeighbourUpdate {
             update_type: model::UpdateType::Add,
             probe_timer: 1,
             aggregate_timer: 10,
-            update: vec![neighbour]
+            update: vec![neighbour],
         };
         tokio::spawn(async move {
-            let mut ctrl = PeerController::new(
-                "0".into(),
-                1,
-                10,
-                rx,
-                mgr_tx,
-                false
-            ).await;
+            let mut ctrl = PeerController::new("0".into(), 1, 10, rx, mgr_tx, false).await;
             ctrl.work().await;
         });
         assert!(tx.send(neighbour_update).await.is_ok());
