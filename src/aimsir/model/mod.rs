@@ -62,7 +62,7 @@ pub struct Probe {
     pub ts: u64,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct StoreMetric {
     pub ts: u64,
     pub pl: u32,

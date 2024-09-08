@@ -93,7 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .serve(node_ip)
             .await;
     });
-    // let web_ip: SocketAddr = app.get_one::<String>("webip").unwrap().as_str().parse().unwrap();
+    let node_ip: String = app.get_one::<String>("ip").unwrap().to_string();
     let web_app = Router::new()
         .route("/stats", get(stats))
         .route("/stats/:statid", get(stats_id))
@@ -102,6 +102,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             db: Arc::new(RwLock::new(
                 model::db::SqliteDb::new("test".to_string()).await?,
             )),
+            grpc_server: Arc::new(RwLock::new(format!("http://{}", node_ip))),
         });
     tokio::spawn(async move {
         let _ = render_results(input_metrics, parse_db, reconcile_time, metrics).await;
