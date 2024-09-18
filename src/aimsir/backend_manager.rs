@@ -1,8 +1,8 @@
+use log;
 use axum::{
     extract::{Json, Path, State},
     http::StatusCode,
 };
-// use futures::TryFutureExt;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
@@ -359,6 +359,7 @@ pub async fn render_results(
     let sleep_duration = Duration::from_secs(reconcile_time.into());
     loop {
         async_time::sleep(sleep_duration).await;
+        log::debug!("Updating output metrics");
         let peers = db.get_peers().await?;
         let tags = db.get_tags().await?;
         let tag_levels = db.get_tag_levels().await?;
@@ -656,7 +657,6 @@ mod tests {
             peer_id: "0".into(),
             name: "name".into(),
         };
-        println!("Sending request");
         let request = Request::builder()
             .method("POST")
             .header("Content-Type", "application/json")

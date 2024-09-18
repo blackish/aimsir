@@ -20,7 +20,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = clap::Command::new("aimsir-server")
         .version("0.0.1")
         .arg(clap::arg!(ip: -p --ip <ip> "node local ip").required(true))
-        .arg(clap::arg!(webip: -w --web-ip <webip> "node web ui local ip").required(true))
+        .arg(clap::arg!(webip: -w --webip <webip> "node web ui local ip").required(true))
+        .arg(clap::arg!(db: -b --db <db> "database name").required(true))
         .arg(
             clap::arg!(interval: -i --interval <interval> "probe interval")
                 .required(true)
@@ -73,16 +74,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .as_str()
         .parse()
         .unwrap();
+    let db: String = app.get_one::<String>("db").unwrap().as_str().to_string();
     let aimsir_server = aimsir::server_manager::ServerController::new(
         *app.get_one::<u32>("interval").expect("Expect u32 interval"),
         *app.get_one::<u32>("aggregate")
             .expect("Expect u32 aggregate interval"),
-        Box::new(model::db::SqliteDb::new("test".to_string()).await?),
+        Box::new(model::db::SqliteDb::new(db.clone()).await?),
     )
     .await?;
 
     let input_metrics = aimsir_server.get_metrics();
-    let parse_db = Box::new(model::db::SqliteDb::new("test".to_string()).await?);
+    let parse_db = Box::new(model::db::SqliteDb::new(db.clone()).await?);
     let metrics = Arc::new(RwLock::new(HashMap::new()));
     let reconcile_time: u16 = 60;
 
@@ -100,7 +102,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_state(BackendState {
             metrics: metrics.clone(),
             db: Arc::new(RwLock::new(
-                model::db::SqliteDb::new("test".to_string()).await?,
+                model::db::SqliteDb::new(db).await?,
             )),
             grpc_server: Arc::new(RwLock::new(format!("http://{}", node_ip))),
         });
