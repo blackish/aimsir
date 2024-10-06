@@ -79,12 +79,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         *app.get_one::<u32>("interval").expect("Expect u32 interval"),
         *app.get_one::<u32>("aggregate")
             .expect("Expect u32 aggregate interval"),
-        Box::new(model::db::SqliteDb::new(db.clone()).await?),
+        Box::new(model::mysql::MysqlDb::new(db.clone()).await?),
     )
     .await?;
 
     let input_metrics = aimsir_server.get_metrics();
-    let parse_db = Box::new(model::db::SqliteDb::new(db.clone()).await?);
+    let parse_db = Box::new(model::mysql::MysqlDb::new(db.clone()).await?);
     let metrics = Arc::new(RwLock::new(HashMap::new()));
     let reconcile_time: u16 = 60;
 
@@ -102,7 +102,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_state(BackendState {
             metrics: metrics.clone(),
             db: Arc::new(RwLock::new(
-                model::db::SqliteDb::new(db).await?,
+                model::mysql::MysqlDb::new(db).await?,
             )),
             grpc_server: Arc::new(RwLock::new(format!("http://{}", node_ip))),
         });

@@ -221,7 +221,7 @@ impl aimsir_service_server::AimsirService for ServerController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::db::Db;
+    use model::db::Db;
     use aimsir::{
         self, aimsir_service_client::AimsirServiceClient,
         aimsir_service_server::AimsirServiceServer,
@@ -230,12 +230,17 @@ mod tests {
     use tokio::{self, sync::mpsc};
     use tokio_stream;
     use tonic;
+    use dotenv;
+    use std::env;
 
     #[tokio::test]
     async fn test_connect_nonexisting_peer() {
         let _ = env_logger::try_init();
+        dotenv::dotenv().expect("Could not load the .env file!");
+        let database_url =
+            env::var("DATABASE_URL").expect("The environment variable DATABASE_URL is missing!");
         let db = Box::new(
-            model::db::SqliteDb::new("sqlite://diesel.sqlite".to_string())
+            model::mysql::MysqlDb::new(database_url.to_string())
                 .await
                 .unwrap(),
         );
@@ -264,7 +269,10 @@ mod tests {
     #[tokio::test]
     async fn test_connect_existing_peer() {
         let _ = env_logger::try_init();
-        let mut local_db = model::db::SqliteDb::new("sqlite://diesel.sqlite".to_string())
+        dotenv::dotenv().expect("Could not load the .env file!");
+        let database_url =
+            env::var("DATABASE_URL").expect("The environment variable DATABASE_URL is missing!");
+        let mut local_db = model::mysql::MysqlDb::new(database_url.to_string())
             .await
             .unwrap();
         local_db
@@ -275,7 +283,7 @@ mod tests {
             .await
             .unwrap();
         let db = Box::new(
-            model::db::SqliteDb::new("sqlite://diesel.sqlite".to_string())
+            model::mysql::MysqlDb::new(database_url.to_string())
                 .await
                 .unwrap(),
         );
@@ -382,7 +390,10 @@ mod tests {
     #[tokio::test]
     async fn test_metrics() {
         let _ = env_logger::try_init();
-        let mut local_db = model::db::SqliteDb::new("sqlite://diesel.sqlite".to_string())
+        dotenv::dotenv().expect("Could not load the .env file!");
+        let database_url =
+            env::var("DATABASE_URL").expect("The environment variable DATABASE_URL is missing!");
+        let mut local_db = model::mysql::MysqlDb::new(database_url.to_string())
             .await
             .unwrap();
         local_db
@@ -393,7 +404,7 @@ mod tests {
             .await
             .unwrap();
         let db = Box::new(
-            model::db::SqliteDb::new("sqlite://diesel.sqlite".to_string())
+            model::mysql::MysqlDb::new(database_url.to_string())
                 .await
                 .unwrap(),
         );

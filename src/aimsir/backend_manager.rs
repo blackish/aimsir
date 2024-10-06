@@ -1,8 +1,8 @@
-use log;
 use axum::{
     extract::{Json, Path, State},
     http::StatusCode,
 };
+use log;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
@@ -17,12 +17,12 @@ use crate::model::aimsir::aimsir_service_client::AimsirServiceClient;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct BackendTag {
-    values: HashMap<i64, model::StoreMetric>,
+    values: HashMap<i32, model::StoreMetric>,
 }
 
 #[derive(Clone)]
 pub struct BackendState {
-    pub metrics: Arc<RwLock<HashMap<i64, HashMap<i64, BackendTag>>>>,
+    pub metrics: Arc<RwLock<HashMap<i32, HashMap<i32, BackendTag>>>>,
     pub db: Arc<RwLock<dyn model::db::Db + Send + Sync>>,
     pub grpc_server: Arc<RwLock<String>>,
 }
@@ -35,7 +35,7 @@ pub async fn stats(
 }
 
 pub async fn stats_id(
-    Path(id): Path<i64>,
+    Path(id): Path<i32>,
     State(metrics): State<BackendState>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     if let Some(stats) = metrics.metrics.read().await.get(&id) {
@@ -179,7 +179,7 @@ pub async fn add_tag(
 }
 
 pub async fn del_tag(
-    Path(tag): Path<i64>,
+    Path(tag): Path<i32>,
     State(metrics): State<BackendState>,
 ) -> Result<(), (StatusCode, String)> {
     metrics
@@ -205,7 +205,7 @@ pub async fn add_tag_level(
 }
 
 pub async fn del_tag_level(
-    Path(tag_level): Path<i64>,
+    Path(tag_level): Path<i32>,
     State(metrics): State<BackendState>,
 ) -> Result<(), (StatusCode, String)> {
     metrics
@@ -231,7 +231,7 @@ pub async fn add_peer_tag(
 }
 
 pub async fn del_peer_tag(
-    Path((peer_id, tag_id)): Path<(String, i64)>,
+    Path((peer_id, tag_id)): Path<(String, i32)>,
     State(metrics): State<BackendState>,
 ) -> Result<(), (StatusCode, String)> {
     metrics
@@ -261,12 +261,12 @@ async fn _create_result_hashmap(
     peer_tags: Vec<model::PeerTag>,
 ) -> Result<
     (
-        HashMap<i64, HashMap<i64, BackendTag>>,
-        HashMap<String, HashMap<i64, i64>>,
+        HashMap<i32, HashMap<i32, BackendTag>>,
+        HashMap<String, HashMap<i32, i32>>,
     ),
     sqlx::Error,
 > {
-    let mut peers_with_tags: HashMap<String, HashMap<i64, i64>> =
+    let mut peers_with_tags: HashMap<String, HashMap<i32, i32>> =
         HashMap::with_capacity(peers.len());
     for peer in peers {
         peers_with_tags
@@ -281,7 +281,7 @@ async fn _create_result_hashmap(
                 hm
             });
     }
-    let mut levels: HashMap<i64, HashMap<i64, BackendTag>> =
+    let mut levels: HashMap<i32, HashMap<i32, BackendTag>> =
         HashMap::with_capacity(tag_levels.len());
     for level in &tag_levels {
         let tag_list: Vec<model::Tag> = tags
@@ -289,7 +289,7 @@ async fn _create_result_hashmap(
             .into_iter()
             .filter(|x| x.level == level.id)
             .collect();
-        let mut tags_in_level: HashMap<i64, BackendTag> = HashMap::with_capacity(tag_list.len());
+        let mut tags_in_level: HashMap<i32, BackendTag> = HashMap::with_capacity(tag_list.len());
         for tag in &tag_list {
             tags_in_level.insert(
                 tag.id,
@@ -309,8 +309,8 @@ async fn _create_result_hashmap(
 
 fn _parse_output_metrics(
     local_metrics: &HashMap<String, HashMap<String, model::StoreMetric>>,
-    peers_with_tags: HashMap<String, HashMap<i64, i64>>,
-    levels: &mut HashMap<i64, HashMap<i64, BackendTag>>,
+    peers_with_tags: HashMap<String, HashMap<i32, i32>>,
+    levels: &mut HashMap<i32, HashMap<i32, BackendTag>>,
 ) {
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -354,7 +354,7 @@ pub async fn render_results(
     metrics: Arc<RwLock<HashMap<String, HashMap<String, model::StoreMetric>>>>,
     mut db: Box<dyn model::db::Db>,
     reconcile_time: u16,
-    output_metrics: Arc<RwLock<HashMap<i64, HashMap<i64, BackendTag>>>>,
+    output_metrics: Arc<RwLock<HashMap<i32, HashMap<i32, BackendTag>>>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let sleep_duration = Duration::from_secs(reconcile_time.into());
     loop {
@@ -387,8 +387,10 @@ mod tests {
         routing::{delete, get, post},
         Router,
     };
+    use dotenv;
     use http_body_util::BodyExt;
     use model::aimsir::aimsir_service_server::AimsirService;
+    use std::env;
     use std::net::SocketAddr;
     use tokio::{self, sync::mpsc};
     use tokio_stream::wrappers::ReceiverStream;
@@ -441,6 +443,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_stats() {
+        dotenv::dotenv().expect("Could not load the .env file!");
+        let database_url =
+            env::var("DATABASE_URL").expect("The environment variable DATABASE_URL is missing!");
         let storemetric = model::StoreMetric {
             jitter_min: 0.0,
             jitter_max: 1.0,
@@ -457,7 +462,7 @@ mod tests {
             .await
             .insert(0, HashMap::from([(1, backendtag)]));
         let db = Arc::new(RwLock::new(
-            model::db::SqliteDb::new("sqlite://diesel.sqlite".to_string())
+            model::mysql::MysqlDb::new(database_url.to_string())
                 .await
                 .unwrap(),
         ));
@@ -481,6 +486,9 @@ mod tests {
     }
     #[tokio::test]
     async fn test_get_stats_id_non_existent() {
+        dotenv::dotenv().expect("Could not load the .env file!");
+        let database_url =
+            env::var("DATABASE_URL").expect("The environment variable DATABASE_URL is missing!");
         let storemetric = model::StoreMetric {
             jitter_min: 0.0,
             jitter_max: 1.0,
@@ -497,7 +505,7 @@ mod tests {
             .await
             .insert(0, HashMap::from([(1, backendtag)]));
         let db = Arc::new(RwLock::new(
-            model::db::SqliteDb::new("sqlite://diesel.sqlite".to_string())
+            model::mysql::MysqlDb::new(database_url.to_string())
                 .await
                 .unwrap(),
         ));
@@ -520,6 +528,9 @@ mod tests {
     }
     #[tokio::test]
     async fn test_get_stats_id_exists() {
+        dotenv::dotenv().expect("Could not load the .env file!");
+        let database_url =
+            env::var("DATABASE_URL").expect("The environment variable DATABASE_URL is missing!");
         let storemetric = model::StoreMetric {
             jitter_min: 0.0,
             jitter_max: 1.0,
@@ -536,7 +547,7 @@ mod tests {
             .await
             .insert(0, HashMap::from([(1, backendtag)]));
         let db = Arc::new(RwLock::new(
-            model::db::SqliteDb::new("sqlite://diesel.sqlite".to_string())
+            model::mysql::MysqlDb::new(database_url.to_string())
                 .await
                 .unwrap(),
         ));
@@ -560,6 +571,9 @@ mod tests {
     }
     #[tokio::test]
     async fn test_get_levels() {
+        dotenv::dotenv().expect("Could not load the .env file!");
+        let database_url =
+            env::var("DATABASE_URL").expect("The environment variable DATABASE_URL is missing!");
         let storemetric = model::StoreMetric {
             jitter_min: 0.0,
             jitter_max: 1.0,
@@ -576,7 +590,7 @@ mod tests {
             .await
             .insert(0, HashMap::from([(1, backendtag)]));
         let db = Arc::new(RwLock::new(
-            model::db::SqliteDb::new("sqlite://diesel.sqlite".to_string())
+            model::mysql::MysqlDb::new(database_url.to_string())
                 .await
                 .unwrap(),
         ));
@@ -600,6 +614,9 @@ mod tests {
     }
     #[tokio::test]
     async fn test_api() {
+        dotenv::dotenv().expect("Could not load the .env file!");
+        let database_url =
+            env::var("DATABASE_URL").expect("The environment variable DATABASE_URL is missing!");
         let storemetric = model::StoreMetric {
             jitter_min: 0.0,
             jitter_max: 1.0,
@@ -629,7 +646,7 @@ mod tests {
             .await
             .insert(0, HashMap::from([(1, backendtag)]));
         let db = Arc::new(RwLock::new(
-            model::db::SqliteDb::new("sqlite://diesel.sqlite".to_string())
+            model::mysql::MysqlDb::new(database_url.to_string())
                 .await
                 .unwrap(),
         ));
@@ -900,8 +917,8 @@ mod tests {
         let (levels, peers_with_tags) = _create_result_hashmap(peers, tags, tag_levels, peer_tags)
             .await
             .expect("ERR");
-        let mut result_levels: HashMap<i64, HashMap<i64, BackendTag>> = HashMap::new();
-        let mut level_map: HashMap<i64, BackendTag> = HashMap::new();
+        let mut result_levels: HashMap<i32, HashMap<i32, BackendTag>> = HashMap::new();
+        let mut level_map: HashMap<i32, BackendTag> = HashMap::new();
         level_map.insert(
             0,
             BackendTag {
@@ -921,7 +938,7 @@ mod tests {
             },
         );
         result_levels.insert(0, level_map);
-        let mut level_map: HashMap<i64, BackendTag> = HashMap::new();
+        let mut level_map: HashMap<i32, BackendTag> = HashMap::new();
         level_map.insert(
             2,
             BackendTag {
@@ -942,17 +959,17 @@ mod tests {
         );
         result_levels.insert(1, level_map);
         assert_eq!(result_levels, levels);
-        let mut result_peer_with_tags: HashMap<String, HashMap<i64, i64>> = HashMap::new();
-        let peer_hashmap: HashMap<i64, i64> = HashMap::from([(0, 0), (1, 2)]);
+        let mut result_peer_with_tags: HashMap<String, HashMap<i32, i32>> = HashMap::new();
+        let peer_hashmap: HashMap<i32, i32> = HashMap::from([(0, 0), (1, 2)]);
         result_peer_with_tags.insert("0".into(), peer_hashmap);
-        let peer_hashmap: HashMap<i64, i64> = HashMap::from([(0, 1), (1, 3)]);
+        let peer_hashmap: HashMap<i32, i32> = HashMap::from([(0, 1), (1, 3)]);
         result_peer_with_tags.insert("1".into(), peer_hashmap);
         assert_eq!(result_peer_with_tags, peers_with_tags);
     }
     #[tokio::test]
     async fn test_parse_output_metrics() {
-        let mut result_levels: HashMap<i64, HashMap<i64, BackendTag>> = HashMap::new();
-        let mut level_map: HashMap<i64, BackendTag> = HashMap::new();
+        let mut result_levels: HashMap<i32, HashMap<i32, BackendTag>> = HashMap::new();
+        let mut level_map: HashMap<i32, BackendTag> = HashMap::new();
         level_map.insert(
             0,
             BackendTag {
@@ -972,7 +989,7 @@ mod tests {
             },
         );
         result_levels.insert(0, level_map);
-        let mut level_map: HashMap<i64, BackendTag> = HashMap::new();
+        let mut level_map: HashMap<i32, BackendTag> = HashMap::new();
         level_map.insert(
             2,
             BackendTag {
@@ -992,10 +1009,10 @@ mod tests {
             },
         );
         result_levels.insert(1, level_map);
-        let mut result_peer_with_tags: HashMap<String, HashMap<i64, i64>> = HashMap::new();
-        let peer_hashmap: HashMap<i64, i64> = HashMap::from([(0, 0), (1, 2)]);
+        let mut result_peer_with_tags: HashMap<String, HashMap<i32, i32>> = HashMap::new();
+        let peer_hashmap: HashMap<i32, i32> = HashMap::from([(0, 0), (1, 2)]);
         result_peer_with_tags.insert("0".into(), peer_hashmap);
-        let peer_hashmap: HashMap<i64, i64> = HashMap::from([(0, 1), (1, 3)]);
+        let peer_hashmap: HashMap<i32, i32> = HashMap::from([(0, 1), (1, 3)]);
         result_peer_with_tags.insert("1".into(), peer_hashmap);
         let mut local_metrics: HashMap<String, HashMap<String, model::StoreMetric>> =
             HashMap::new();
