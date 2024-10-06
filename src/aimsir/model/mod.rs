@@ -2,6 +2,7 @@ pub mod aimsir {
     tonic::include_proto!("aimsir");
 }
 pub mod db;
+pub mod mysql;
 use serde::{Deserialize, Serialize};
 use std::{
     time::{SystemTime, UNIX_EPOCH},
@@ -120,20 +121,20 @@ pub struct Peer {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Tag {
-    pub id: i64,
-    pub level: i64,
+    pub id: i32,
+    pub level: i32,
     pub name: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct TagLevel {
-    pub id: i64,
-    pub parent: Option<i64>,
+    pub id: i32,
+    pub parent: Option<i32>,
     pub name: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PeerTag {
     pub peer_id: String,
-    pub tag_id: i64,
+    pub tag_id: i32,
 }
