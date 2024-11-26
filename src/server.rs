@@ -7,7 +7,10 @@ use aimsir::{
     backend_manager::BackendState,
     model::{self, aimsir::aimsir_service_server::AimsirServiceServer},
 };
-use axum::{routing::get, Router};
+use axum::{
+    routing::{delete, get, post},
+    Router,
+};
 use clap;
 use log;
 use simple_logger;
