@@ -1,4 +1,7 @@
-use aimsir::backend_manager::{render_results, stats, stats_id};
+use aimsir::backend_manager::{
+    add_peer, add_peer_tag, add_tag, add_tag_level, del_peer, del_peer_tag, del_tag, del_tag_level,
+    peer_tags, peers, render_results, stats, stats_id, tag_levels, tags,
+};
 use aimsir::{
     self,
     backend_manager::BackendState,
@@ -99,11 +102,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let web_app = Router::new()
         .route("/stats", get(stats))
         .route("/stats/:statid", get(stats_id))
+        .route("/peers", get(peers))
+        .route("/peers", post(add_peer))
+        .route("/peers/:peer", delete(del_peer))
+        .route("/tags", get(tags))
+        .route("/tags", post(add_tag))
+        .route("/tags/:tag", delete(del_tag))
+        .route("/levels", get(tag_levels))
+        .route("/levels", post(add_tag_level))
+        .route("/levels/:level", delete(del_tag_level))
+        .route("/peertags", get(peer_tags))
+        .route("/peertags", post(add_peer_tag))
+        .route("/peertags/:peer/:tag", delete(del_peer_tag))
         .with_state(BackendState {
             metrics: metrics.clone(),
-            db: Arc::new(RwLock::new(
-                model::mysql::MysqlDb::new(db).await?,
-            )),
+            db: Arc::new(RwLock::new(model::mysql::MysqlDb::new(db).await?)),
             grpc_server: Arc::new(RwLock::new(format!("http://{}", node_ip))),
         });
     tokio::spawn(async move {
