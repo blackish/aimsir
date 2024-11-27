@@ -274,7 +274,7 @@ async fn _create_result_hashmap(
             .or_insert_with(|| {
                 let mut hm = HashMap::with_capacity(tag_levels.len());
                 for tag in peer_tags.iter().filter(|x| x.peer_id == &*peer.peer_id) {
-                    if let Some(level) = tags.iter().find(|x| x.id == tag.tag_id) {
+                    if let Some(level) = tags.iter().find(|x| x.id.unwrap() == tag.tag_id) {
                         hm.insert(level.level, tag.tag_id);
                     }
                 }
@@ -287,22 +287,22 @@ async fn _create_result_hashmap(
         let tag_list: Vec<model::Tag> = tags
             .clone()
             .into_iter()
-            .filter(|x| x.level == level.id)
+            .filter(|x| x.level == level.id.unwrap())
             .collect();
         let mut tags_in_level: HashMap<i32, BackendTag> = HashMap::with_capacity(tag_list.len());
         for tag in &tag_list {
             tags_in_level.insert(
-                tag.id,
+                tag.id.unwrap(),
                 BackendTag {
                     values: tag_list
                         .clone()
                         .into_iter()
-                        .map(|x| (x.id, model::StoreMetric::new_empty()))
+                        .map(|x| (x.id.unwrap(), model::StoreMetric::new_empty()))
                         .collect(),
                 },
             );
         }
-        levels.insert(level.id, tags_in_level);
+        levels.insert(level.id.unwrap(), tags_in_level);
     }
     return Ok((levels, peers_with_tags));
 }
@@ -697,7 +697,7 @@ mod tests {
 
         // Creating new level
         let mut new_level = model::TagLevel {
-            id: 1,
+            id: Some(1),
             parent: None,
             name: "Top level".into(),
         };
@@ -715,7 +715,7 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(request).await.expect("ERR");
-        new_level.id = 0;
+        new_level.id = Some(0);
         assert_eq!(response.status(), StatusCode::OK);
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let body: Value = serde_json::from_slice(&body).unwrap();
@@ -723,7 +723,7 @@ mod tests {
 
         // Creating new tag
         let mut new_tag = model::Tag {
-            id: 1,
+            id: Some(1),
             level: 0,
             name: "Top tag".into(),
         };
@@ -741,7 +741,7 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(request).await.expect("ERR");
-        new_tag.id = 0;
+        new_tag.id = Some(0);
         assert_eq!(response.status(), StatusCode::OK);
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let body: Value = serde_json::from_slice(&body).unwrap();
@@ -854,34 +854,34 @@ mod tests {
     async fn test_create_result_hashmap() {
         let tag_levels: Vec<model::TagLevel> = vec![
             model::TagLevel {
-                id: 0,
+                id: Some(0),
                 parent: None,
                 name: "root".into(),
             },
             model::TagLevel {
-                id: 1,
+                id: Some(1),
                 parent: Some(1),
                 name: "child".into(),
             },
         ];
         let tags: Vec<model::Tag> = vec![
             model::Tag {
-                id: 0,
+                id: Some(0),
                 level: 0,
                 name: "root_tag1".into(),
             },
             model::Tag {
-                id: 1,
+                id: Some(1),
                 level: 0,
                 name: "root_tag2".into(),
             },
             model::Tag {
-                id: 2,
+                id: Some(2),
                 level: 1,
                 name: "child_tag1".into(),
             },
             model::Tag {
-                id: 3,
+                id: Some(3),
                 level: 1,
                 name: "child_tag2".into(),
             },
