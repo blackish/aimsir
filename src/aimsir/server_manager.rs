@@ -165,14 +165,18 @@ impl aimsir_service_server::AimsirService for ServerController {
             id: new_peer.id,
             ipaddress: String::from(""),
         };
-        local_clients.push(new_peer.clone());
         let sender = self.update_tx.clone();
+        if sender.receiver_count() == 0 {
+            local_clients.push(new_peer.clone());
+            return Ok(tonic::Response::new(aimsir::PeerResponse { ok: true }));
+        }
         if let Ok(_) = sender.send(aimsir::PeerUpdate {
             update_type: aimsir::PeerUpdateType::Add.into(),
             probe_interval: self.probe_interval.clone(),
             aggregate_interval: self.aggregate_interval.clone(),
-            update: vec![new_peer],
+            update: vec![new_peer.clone()],
         }) {
+            local_clients.push(new_peer);
             return Ok(tonic::Response::new(aimsir::PeerResponse { ok: true }));
         }
         return Err(tonic::Status::internal("Failed to send peers"));
@@ -189,14 +193,19 @@ impl aimsir_service_server::AimsirService for ServerController {
             // peer does not exist in DB
             return Err(tonic::Status::not_found("Peer not found"));
         };
-        let new_peer = local_clients.remove(position.unwrap());
+        let new_peer = local_clients.get(position.unwrap()).unwrap();
         let sender = self.update_tx.clone();
+        if sender.receiver_count() == 0 {
+            _ = local_clients.remove(position.unwrap());
+            return Ok(tonic::Response::new(aimsir::PeerResponse { ok: true }));
+        }
         if let Ok(_) = sender.send(aimsir::PeerUpdate {
             update_type: aimsir::PeerUpdateType::Remove.into(),
             probe_interval: self.probe_interval.clone(),
             aggregate_interval: self.aggregate_interval.clone(),
-            update: vec![new_peer],
+            update: vec![new_peer.clone()],
         }) {
+            _ = local_clients.remove(position.unwrap());
             return Ok(tonic::Response::new(aimsir::PeerResponse { ok: true }));
         }
         return Err(tonic::Status::internal("Failed to send peers"));
