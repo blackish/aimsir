@@ -25,6 +25,7 @@ pub struct PeerController {
     peer_sender: Sender<model::PeerUpdate>,
     manager_receiver: Receiver<model::NeighbourUpdate>,
     manager_sender: Sender<Vec<model::Measurement>>,
+    local_id: Box<str>,
     test: bool,
 }
 
@@ -53,10 +54,10 @@ impl PeerController {
         let udp_sender = Arc::new(udp_socket);
         let udp_receiver = udp_sender.clone();
         let sender_probe_timer = probe_timer.clone();
+        let id = local_id.clone();
         log::info!("Start sending thread");
         if !test {
             tokio::spawn(async move {
-                let id = local_id.clone();
                 let mut seq: u64 = 0;
                 let mut peer_list: Vec<String> = Vec::new();
                 let mut timer = time::interval(Duration::from_secs(sender_probe_timer));
@@ -116,6 +117,7 @@ impl PeerController {
             peer_sender: tx,
             manager_receiver: mgr_rcv,
             manager_sender: mgr_send,
+            local_id,
             test,
         }
     }
@@ -131,7 +133,6 @@ impl PeerController {
             select! {
                 res = self.peer_receiver.recv() => {
                     if let Some(peer_msg) = res {
-                        log::debug!("Got probe from: {}", peer_msg.id);
                         self.peers
                             .entry(peer_msg.id.to_string())
                             .and_modify(|entry|
@@ -152,6 +153,7 @@ impl PeerController {
                                                 if jitter < stat_entry.jitter_min || stat_entry.jitter_min == 0.0 {
                                                     stat_entry.jitter_min = jitter;
                                                 }
+                                                log::debug!("Got probe from: {}. jitter: {}, pl: {}", peer_msg.id, jitter, stat_entry.pl);
                                             }).or_insert_with(||
                                                 {
                                                     let mut new_entry = model::Measurement{
@@ -166,6 +168,7 @@ impl PeerController {
                                                         let estimate_pl = (current_ts as u64 - last_aggregate_ts as u64)/(self.probe_timer * 1000);
                                                         new_entry.pl = estimate_pl as u64;
                                                     };
+                                                    log::debug!("Got probe from: {}. jitter: {}, pl: {}", peer_msg.id, jitter, new_entry.pl);
                                                     new_entry
                                                 }
                                             );
@@ -184,6 +187,9 @@ impl PeerController {
                             model::UpdateType::Full => {
                                 _ = self.peers.drain();
                                 for key in mgr_msg.update {
+                                    if key.id == self.local_id.to_string() {
+                                        continue;
+                                    }
                                     self.peers.insert(key.id.clone(),
                                             model::Neighbour {
                                                 peer: model::aimsir::Peer {
@@ -200,6 +206,9 @@ impl PeerController {
                             }
                             model::UpdateType::Add => {
                                 for key in mgr_msg.update {
+                                    if key.id == self.local_id.to_string() {
+                                        continue;
+                                    }
                                     self.peers
                                         .entry(key.id.clone())
                                         .and_modify(|x| x.peer.ipaddress=key.ipaddress.clone())

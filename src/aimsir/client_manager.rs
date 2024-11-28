@@ -76,8 +76,7 @@ async fn metric_composer(
 ) {
     log::debug!("Start sending metrics");
     let metric_stream = stream! {
-        let res = meas_rx.recv().await;
-        if let Some(res_vec) = res {
+        while let Some(res_vec) = meas_rx.recv().await {
             let mut metric_vec: Vec<Metric> = Vec::new();
             for single_res in res_vec {
                 log::trace!("New metric for {}", single_res.id.to_string());
