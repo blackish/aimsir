@@ -119,15 +119,8 @@ pub struct Peer {
     pub name: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Tag {
-    pub id: Option<i32>,
-    pub level: i32,
-    pub name: String,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct TagLevel {
     pub id: Option<i32>,
     pub parent: Option<i32>,
     pub name: String,

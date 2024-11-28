@@ -36,7 +36,7 @@ impl model::db::Db for MysqlDb {
         let _results = sqlx::query!(
             "INSERT INTO tags VALUES (?, ?, ?)",
             next_id,
-            tag.level,
+            tag.parent,
             tag.name,
         )
         .execute(&self.conn)
@@ -44,53 +44,16 @@ impl model::db::Db for MysqlDb {
         Ok(())
     }
     async fn del_tag(&mut self, tag_id: i32) -> Result<(), sqlx::Error> {
+        let tag = sqlx::query_as!(model::Tag, "SELECT * FROM tags WHERE id = ?", tag_id,)
+            .fetch_one(&self.conn)
+            .await?;
+        let _results = sqlx::query!("UPDATE tags SET parent = ? WHERE parent = ?", tag.parent, tag_id)
+            .execute(&self.conn)
+            .await?;
         let _results = sqlx::query!("DELETE FROM tags WHERE id = ?", tag_id,)
             .execute(&self.conn)
             .await?;
         let _results = sqlx::query!("DELETE FROM peer_tags WHERE tag_id = ?", tag_id,)
-            .execute(&self.conn)
-            .await?;
-        Ok(())
-    }
-    async fn get_tag_levels(&mut self) -> Result<Vec<model::TagLevel>, sqlx::Error> {
-        let results = sqlx::query_as!(model::TagLevel, "SELECT * FROM tag_levels",)
-            .fetch_all(&self.conn)
-            .await?;
-        Ok(results)
-    }
-    async fn add_tag_level(&mut self, level: model::TagLevel) -> Result<(), sqlx::Error> {
-        let max_id_request = sqlx::query!("SELECT IFNULL(MAX(id), -1) as id FROM tag_levels",)
-            .fetch_one(&self.conn)
-            .await?;
-        let next_id = max_id_request.id + 1;
-        let _results = sqlx::query!(
-            "INSERT INTO tag_levels VALUES (?, ?, ?)",
-            next_id,
-            level.parent,
-            level.name,
-        )
-        .execute(&self.conn)
-        .await?;
-        Ok(())
-    }
-    async fn del_tag_level(&mut self, level_id: i32) -> Result<(), sqlx::Error> {
-        let _results = sqlx::query!(
-            "DELETE FROM peer_tags WHERE tag_id in (SELECT id FROM tags WHERE level = ?)",
-            level_id
-        )
-        .execute(&self.conn)
-        .await?;
-        let _results = sqlx::query!("DELETE FROM tags WHERE level = ?", level_id,)
-            .execute(&self.conn)
-            .await?;
-        let _results = sqlx::query!(
-            "UPDATE tag_levels SET parent=(SELECT parent FROM tag_levels WHERE id = ? LIMIT 1) WHERE parent = ?",
-            level_id,
-            level_id,
-        )
-        .execute(&self.conn)
-        .await?;
-        let _results = sqlx::query!("DELETE FROM tag_levels WHERE id = ?", level_id,)
             .execute(&self.conn)
             .await?;
         Ok(())
