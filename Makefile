@@ -18,7 +18,7 @@ docker-up:
 
 # Wait for MySQL to be ready
 wait-for-mysql: docker-up
-	@until docker compose exec -T mariadb mariadb-admin ping -h"$(MYSQL_HOST)" -P"$(MYSQL_PORT)" --user="$(MYSQL_USER)" --password="$(MYSQL_PASSWORD)" --silent &> /dev/null ; do \
+	@until $(DOCKER_COMPOSE) exec -T mariadb mariadb-admin ping -h"$(MYSQL_HOST)" -P"$(MYSQL_PORT)" --user="$(MYSQL_USER)" --password="$(MYSQL_PASSWORD)" --silent &> /dev/null ; do \
 		echo "MySQL is unavailable - sleeping"; \
 		sleep 3; \
 	done
