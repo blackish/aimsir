@@ -53,7 +53,7 @@ message PeerResponse {
 }
 
 service AimsirService {
-  rpc Metrics(stream MetricMessage) returns (MetricResponse) {}
+  rpc Metrics(stream MetricMessage) returns (stream MetricResponse) {}
   rpc Register(Peer) returns (stream PeerUpdate) {}
   rpc AddPeer(Peer) returns (PeerResponse) {}
   rpc RemovePeer(Peer) returns (PeerResponse) {}

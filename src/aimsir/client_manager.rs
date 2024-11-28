@@ -10,6 +10,7 @@ use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
     task::JoinSet,
 };
+use tokio_stream::StreamExt;
 use tonic::{transport, Request, Streaming};
 
 pub struct ManagerController {
@@ -119,11 +120,21 @@ async fn metric_composer(
         }
     };
     match client.metrics(Request::new(metric_stream)).await {
-        Ok(_) => {
-            log::debug!("Metric has been sent");
+        Ok(response) => {
+            let mut response_stream = response.into_inner();
+            while let Some(received) = response_stream.next().await {
+                match received {
+                    Ok(result) => {
+                        log::debug!("Metric sent: {}", result.ok);
+                    },
+                    Err(err) => {
+                        log::warn!("Failed to send metric: {}", err);
+                    }
+                }
+            }
         }
         Err(e) => {
-            log::warn!("Failed to send metric: {}", e.to_string());
+            log::error!("Failed to connect to metric: {}", e.to_string());
         }
     }
 }
@@ -163,18 +174,23 @@ mod tests {
     #[tonic::async_trait]
     impl AimsirService for TestServer {
         type RegisterStream = ReceiverStream<Result<model::aimsir::PeerUpdate, tonic::Status>>;
+        type MetricsStream = ReceiverStream<Result<aimsir::MetricResponse, tonic::Status>>;
         async fn metrics(
             &self,
-            request: tonic::Request<tonic::Streaming<super::MetricMessage>>,
-        ) -> std::result::Result<tonic::Response<model::aimsir::MetricResponse>, tonic::Status>
-        {
-            let mut stream = request.into_inner();
-            while let Some(new_metric) = stream.next().await {
-                let _ = self.metric_tx.send(new_metric.unwrap()).await;
-            }
-            Ok(tonic::Response::new(model::aimsir::MetricResponse {
-                ok: true,
-            }))
+            request: tonic::Request<tonic::Streaming<aimsir::MetricMessage>>,
+        ) -> std::result::Result<tonic::Response<Self::MetricsStream>, tonic::Status> {
+            let (tx, rx) = mpsc::channel(1);
+            let mut metric_stream = request.into_inner();
+            let metric_tx = self.metric_tx.clone();
+            tokio::spawn(async move {
+                while let Some(metric) = metric_stream.next().await {
+                    if let Ok(metric) = metric {
+                        let _ = metric_tx.send(metric).await;
+                    };
+                    _ = tx.send(Ok(aimsir::MetricResponse { ok: true })).await;
+                }
+            });
+            Ok(tonic::Response::new(ReceiverStream::new(rx)))
         }
         async fn register(
             &self,

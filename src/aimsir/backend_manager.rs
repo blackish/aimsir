@@ -350,14 +350,18 @@ mod tests {
     #[tonic::async_trait]
     impl AimsirService for TestServer {
         type RegisterStream = ReceiverStream<Result<model::aimsir::PeerUpdate, tonic::Status>>;
+        type MetricsStream = ReceiverStream<Result<model::aimsir::MetricResponse, tonic::Status>>;
         async fn metrics(
             &self,
             _request: tonic::Request<tonic::Streaming<model::aimsir::MetricMessage>>,
-        ) -> std::result::Result<tonic::Response<model::aimsir::MetricResponse>, tonic::Status>
-        {
-            Ok(tonic::Response::new(model::aimsir::MetricResponse {
-                ok: true,
-            }))
+        ) -> std::result::Result<tonic::Response<Self::MetricsStream>, tonic::Status> {
+            let (tx, rx) = mpsc::channel(1);
+            tokio::spawn(async move {
+                loop {
+                    _ = tx.send(Ok(model::aimsir::MetricResponse { ok: true })).await;
+                }
+            });
+            Ok(tonic::Response::new(ReceiverStream::new(rx)))
         }
         async fn register(
             &self,

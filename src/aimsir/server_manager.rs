@@ -85,6 +85,7 @@ async fn metric_processor(
 #[tonic::async_trait]
 impl aimsir_service_server::AimsirService for ServerController {
     type RegisterStream = ReceiverStream<Result<aimsir::PeerUpdate, tonic::Status>>;
+    type MetricsStream = ReceiverStream<Result<aimsir::MetricResponse, tonic::Status>>;
     // Got new peer
     async fn register(
         &self,
@@ -165,14 +166,18 @@ impl aimsir_service_server::AimsirService for ServerController {
             id: new_peer.id,
             ipaddress: String::from(""),
         };
-        local_clients.push(new_peer.clone());
         let sender = self.update_tx.clone();
+        if sender.receiver_count() == 0 {
+            local_clients.push(new_peer.clone());
+            return Ok(tonic::Response::new(aimsir::PeerResponse { ok: true }));
+        }
         if let Ok(_) = sender.send(aimsir::PeerUpdate {
             update_type: aimsir::PeerUpdateType::Add.into(),
             probe_interval: self.probe_interval.clone(),
             aggregate_interval: self.aggregate_interval.clone(),
-            update: vec![new_peer],
+            update: vec![new_peer.clone()],
         }) {
+            local_clients.push(new_peer);
             return Ok(tonic::Response::new(aimsir::PeerResponse { ok: true }));
         }
         return Err(tonic::Status::internal("Failed to send peers"));
@@ -189,14 +194,19 @@ impl aimsir_service_server::AimsirService for ServerController {
             // peer does not exist in DB
             return Err(tonic::Status::not_found("Peer not found"));
         };
-        let new_peer = local_clients.remove(position.unwrap());
+        let new_peer = local_clients.get(position.unwrap()).unwrap();
         let sender = self.update_tx.clone();
+        if sender.receiver_count() == 0 {
+            _ = local_clients.remove(position.unwrap());
+            return Ok(tonic::Response::new(aimsir::PeerResponse { ok: true }));
+        }
         if let Ok(_) = sender.send(aimsir::PeerUpdate {
             update_type: aimsir::PeerUpdateType::Remove.into(),
             probe_interval: self.probe_interval.clone(),
             aggregate_interval: self.aggregate_interval.clone(),
-            update: vec![new_peer],
+            update: vec![new_peer.clone()],
         }) {
+            _ = local_clients.remove(position.unwrap());
             return Ok(tonic::Response::new(aimsir::PeerResponse { ok: true }));
         }
         return Err(tonic::Status::internal("Failed to send peers"));
@@ -205,16 +215,21 @@ impl aimsir_service_server::AimsirService for ServerController {
     async fn metrics(
         &self,
         request: tonic::Request<tonic::Streaming<aimsir::MetricMessage>>,
-    ) -> std::result::Result<tonic::Response<aimsir::MetricResponse>, tonic::Status> {
+    ) -> std::result::Result<tonic::Response<Self::MetricsStream>, tonic::Status> {
+        let (tx, rx) = mpsc::channel(1);
         let mut metric_stream = request.into_inner();
-        while let Some(metric) = metric_stream.next().await {
-            if let Ok(metric) = metric {
-                for single_metric in metric.metric {
-                    let _ = self.metric_tx.send(single_metric).await;
-                }
+        let metric_tx = self.metric_tx.clone();
+        tokio::spawn(async move {
+            while let Some(metric) = metric_stream.next().await {
+                if let Ok(metric) = metric {
+                    for single_metric in metric.metric {
+                        let _ = metric_tx.send(single_metric).await;
+                    }
+                };
+                _ = tx.send(Ok(aimsir::MetricResponse { ok: true })).await;
             }
-        }
-        Ok(tonic::Response::new(aimsir::MetricResponse { ok: true }))
+        });
+        Ok(tonic::Response::new(ReceiverStream::new(rx)))
     }
 }
 
