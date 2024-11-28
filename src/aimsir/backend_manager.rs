@@ -22,7 +22,7 @@ pub struct BackendTag {
 
 #[derive(Clone)]
 pub struct BackendState {
-    pub metrics: Arc<RwLock<HashMap<i32, HashMap<i32, BackendTag>>>>,
+    pub metrics: Arc<RwLock<HashMap<i32, BackendTag>>>,
     pub db: Arc<RwLock<dyn model::db::Db + Send + Sync>>,
     pub grpc_server: Arc<RwLock<String>>,
 }
@@ -79,19 +79,6 @@ pub async fn peer_tags(
         .write()
         .await
         .get_peer_tags()
-        .await
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
-    Ok(Json(json!(*result)))
-}
-
-pub async fn tag_levels(
-    State(metrics): State<BackendState>,
-) -> Result<Json<Value>, (StatusCode, String)> {
-    let result = metrics
-        .db
-        .write()
-        .await
-        .get_tag_levels()
         .await
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     Ok(Json(json!(*result)))
@@ -191,32 +178,6 @@ pub async fn del_tag(
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
 }
 
-pub async fn add_tag_level(
-    State(metrics): State<BackendState>,
-    Json(tag_level): Json<model::TagLevel>,
-) -> Result<(), (StatusCode, String)> {
-    metrics
-        .db
-        .write()
-        .await
-        .add_tag_level(tag_level)
-        .await
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
-}
-
-pub async fn del_tag_level(
-    Path(tag_level): Path<i32>,
-    State(metrics): State<BackendState>,
-) -> Result<(), (StatusCode, String)> {
-    metrics
-        .db
-        .write()
-        .await
-        .del_tag_level(tag_level)
-        .await
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
-}
-
 pub async fn add_peer_tag(
     State(metrics): State<BackendState>,
     Json(peer_tag): Json<model::PeerTag>,
@@ -243,74 +204,59 @@ pub async fn del_peer_tag(
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
 }
 
-pub async fn levels(metrics: &State<BackendState>) -> Result<Json<Value>, (StatusCode, String)> {
-    let tag_levels = metrics
-        .db
-        .write()
-        .await
-        .get_tag_levels()
-        .await
-        .map_err(|err: sqlx::Error| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
-    Ok(Json(json!(tag_levels)))
-}
-
 async fn _create_result_hashmap(
     peers: Vec<model::Peer>,
     tags: Vec<model::Tag>,
-    tag_levels: Vec<model::TagLevel>,
     peer_tags: Vec<model::PeerTag>,
 ) -> Result<
     (
-        HashMap<i32, HashMap<i32, BackendTag>>,
-        HashMap<String, HashMap<i32, i32>>,
+        HashMap<i32, BackendTag>,
+        HashMap<String, Vec<model::Tag>>,
     ),
     sqlx::Error,
 > {
-    let mut peers_with_tags: HashMap<String, HashMap<i32, i32>> =
+    let mut peers_with_tags: HashMap<String, Vec<model::Tag>> =
         HashMap::with_capacity(peers.len());
     for peer in peers {
         peers_with_tags
             .entry(peer.peer_id.clone())
             .or_insert_with(|| {
-                let mut hm = HashMap::with_capacity(tag_levels.len());
-                for tag in peer_tags.iter().filter(|x| x.peer_id == &*peer.peer_id) {
-                    if let Some(level) = tags.iter().find(|x| x.id.unwrap() == tag.tag_id) {
-                        hm.insert(level.level, tag.tag_id);
-                    }
-                }
-                hm
+                peer_tags
+                    .iter()
+                    .filter(|x| x.peer_id == &*peer.peer_id)
+                    .map(|x| {
+                        tags
+                            .iter()
+                            .find(|y| y.id.unwrap() == x.tag_id)
+                            .unwrap_or(&model::Tag{id: None, parent: None, name: "Not exists".into()}).clone()
+                    }).collect()
             });
     }
-    let mut levels: HashMap<i32, HashMap<i32, BackendTag>> =
-        HashMap::with_capacity(tag_levels.len());
-    for level in &tag_levels {
+    let mut levels: HashMap<i32, BackendTag> = HashMap::new();
+    for level in &tags {
         let tag_list: Vec<model::Tag> = tags
             .clone()
             .into_iter()
-            .filter(|x| x.level == level.id.unwrap())
+            .filter(|x| x.parent == level.parent)
             .collect();
-        let mut tags_in_level: HashMap<i32, BackendTag> = HashMap::with_capacity(tag_list.len());
-        for tag in &tag_list {
-            tags_in_level.insert(
-                tag.id.unwrap(),
-                BackendTag {
-                    values: tag_list
-                        .clone()
-                        .into_iter()
-                        .map(|x| (x.id.unwrap(), model::StoreMetric::new_empty()))
-                        .collect(),
-                },
-            );
-        }
-        levels.insert(level.id.unwrap(), tags_in_level);
+        levels.insert(
+            level.id.unwrap(),
+            BackendTag {
+                values: tag_list
+                    .clone()
+                    .into_iter()
+                    .map(|x| (x.id.unwrap(), model::StoreMetric::new_empty()))
+                    .collect(),
+            }
+        );
     }
     return Ok((levels, peers_with_tags));
 }
 
 fn _parse_output_metrics(
     local_metrics: &HashMap<String, HashMap<String, model::StoreMetric>>,
-    peers_with_tags: HashMap<String, HashMap<i32, i32>>,
-    levels: &mut HashMap<i32, HashMap<i32, BackendTag>>,
+    peers_with_tags: HashMap<String, Vec<model::Tag>>,
+    levels: &mut HashMap<i32, BackendTag>,
 ) {
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -321,29 +267,31 @@ fn _parse_output_metrics(
         for (src, vals) in metric {
             let src_level = peers_with_tags[src].clone();
             let dst_level = peers_with_tags[dst].clone();
-            for (level, tag) in src_level {
-                if let Some(dst_tag) = dst_level.get(&level) {
-                    levels.entry(level).and_modify(|x| {
-                        x.entry(tag).and_modify(|y| {
-                            y.values.entry(*dst_tag).and_modify(|z| {
-                                z.ts = ts.clone();
-                                z.pl += vals.pl;
-                                if z.jitter_min == -1.0 || z.jitter_min > vals.jitter_min {
-                                    z.jitter_min = vals.jitter_min;
-                                }
-                                if z.jitter_max == -1.0 || z.jitter_max < vals.jitter_max {
-                                    z.jitter_max = vals.jitter_max;
-                                }
-                                if z.jitter_stddev == -1.0 {
-                                    z.jitter_stddev = 0.0;
-                                }
-                                z.jitter_stddev += vals.jitter_stddev;
-                                if z.jitter_stddev != vals.jitter_stddev {
-                                    z.jitter_stddev /= 2.0;
-                                };
+            for level in src_level {
+                if let Some(src_id) = level.id {
+                    if let Some(dst_tag) = dst_level.iter().find(|x| level.parent == x.parent) {
+                        if let Some(dst_id) = dst_tag.id {
+                            levels.entry(src_id).and_modify(|x| {
+                                x.values.entry(dst_id).and_modify(|z| {
+                                    z.ts = ts.clone();
+                                    z.pl += vals.pl;
+                                    if z.jitter_min == -1.0 || z.jitter_min > vals.jitter_min {
+                                        z.jitter_min = vals.jitter_min;
+                                    }
+                                    if z.jitter_max == -1.0 || z.jitter_max < vals.jitter_max {
+                                        z.jitter_max = vals.jitter_max;
+                                    }
+                                    if z.jitter_stddev == -1.0 {
+                                        z.jitter_stddev = 0.0;
+                                    }
+                                    z.jitter_stddev += vals.jitter_stddev;
+                                    if z.jitter_stddev != vals.jitter_stddev {
+                                        z.jitter_stddev /= 2.0;
+                                    };
+                                });
                             });
-                        });
-                    });
+                        }
+                    }
                 }
             }
         }
@@ -354,7 +302,7 @@ pub async fn render_results(
     metrics: Arc<RwLock<HashMap<String, HashMap<String, model::StoreMetric>>>>,
     mut db: Box<dyn model::db::Db>,
     reconcile_time: u16,
-    output_metrics: Arc<RwLock<HashMap<i32, HashMap<i32, BackendTag>>>>,
+    output_metrics: Arc<RwLock<HashMap<i32, BackendTag>>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let sleep_duration = Duration::from_secs(reconcile_time.into());
     loop {
@@ -362,10 +310,9 @@ pub async fn render_results(
         log::debug!("Updating output metrics");
         let peers = db.get_peers().await?;
         let tags = db.get_tags().await?;
-        let tag_levels = db.get_tag_levels().await?;
         let peer_tags = db.get_peer_tags().await?;
         let (mut levels, peers_with_tags) =
-            _create_result_hashmap(peers, tags, tag_levels, peer_tags).await?;
+            _create_result_hashmap(peers, tags, peer_tags).await?;
 
         {
             let local_metrics = metrics.read().await;
@@ -460,7 +407,7 @@ mod tests {
         metrics
             .write()
             .await
-            .insert(0, HashMap::from([(1, backendtag)]));
+            .insert(0, backendtag);
         let db = Arc::new(RwLock::new(
             model::mysql::MysqlDb::new(database_url.to_string())
                 .await
@@ -503,7 +450,7 @@ mod tests {
         metrics
             .write()
             .await
-            .insert(0, HashMap::from([(1, backendtag)]));
+            .insert(0, backendtag);
         let db = Arc::new(RwLock::new(
             model::mysql::MysqlDb::new(database_url.to_string())
                 .await
@@ -545,50 +492,7 @@ mod tests {
         metrics
             .write()
             .await
-            .insert(0, HashMap::from([(1, backendtag)]));
-        let db = Arc::new(RwLock::new(
-            model::mysql::MysqlDb::new(database_url.to_string())
-                .await
-                .unwrap(),
-        ));
-        let backend = BackendState {
-            metrics: metrics.clone(),
-            db,
-            grpc_server: Arc::new(RwLock::new("http://127.0.0.1:10000".into())),
-        };
-        let app = Router::new()
-            .route("/stats/:statid", get(stats_id))
-            .with_state(backend);
-        let request = Request::builder()
-            .uri("/stats/0")
-            .body(Body::empty())
-            .unwrap();
-        let response = app.oneshot(request).await.expect("ERR");
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let body: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(body, json!(*metrics.read().await.get(&0).unwrap()));
-    }
-    #[tokio::test]
-    async fn test_get_levels() {
-        dotenv::dotenv().expect("Could not load the .env file!");
-        let database_url =
-            env::var("DATABASE_URL").expect("The environment variable DATABASE_URL is missing!");
-        let storemetric = model::StoreMetric {
-            jitter_min: 0.0,
-            jitter_max: 1.0,
-            jitter_stddev: 0.5,
-            pl: 5,
-            ts: 1,
-        };
-        let backendtag = BackendTag {
-            values: HashMap::from([(2, storemetric)]),
-        };
-        let metrics = Arc::new(RwLock::new(HashMap::new()));
-        metrics
-            .write()
-            .await
-            .insert(0, HashMap::from([(1, backendtag)]));
+            .insert(0, backendtag);
         let db = Arc::new(RwLock::new(
             model::mysql::MysqlDb::new(database_url.to_string())
                 .await
@@ -644,7 +548,7 @@ mod tests {
         metrics
             .write()
             .await
-            .insert(0, HashMap::from([(1, backendtag)]));
+            .insert(0, backendtag);
         let db = Arc::new(RwLock::new(
             model::mysql::MysqlDb::new(database_url.to_string())
                 .await
@@ -662,9 +566,6 @@ mod tests {
             .route("/tags", get(tags))
             .route("/tags", post(add_tag))
             .route("/tags/:tag", delete(del_tag))
-            .route("/levels", get(tag_levels))
-            .route("/levels", post(add_tag_level))
-            .route("/levels/:level", delete(del_tag_level))
             .route("/peertags", get(peer_tags))
             .route("/peertags", post(add_peer_tag))
             .route("/peertags/:peer/:tag", delete(del_peer_tag))
@@ -695,36 +596,10 @@ mod tests {
         let body: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(body, json!(vec![new_peer]));
 
-        // Creating new level
-        let mut new_level = model::TagLevel {
-            id: Some(1),
-            parent: None,
-            name: "Top level".into(),
-        };
-        let request = Request::builder()
-            .method("POST")
-            .header("Content-Type", "application/json")
-            .uri("/levels")
-            .body(Body::from(json!(new_level).to_string()))
-            .unwrap();
-        let response = app.clone().oneshot(request).await.expect("ERR");
-        assert_eq!(response.status(), StatusCode::OK);
-        let request = Request::builder()
-            .method("GET")
-            .uri("/levels")
-            .body(Body::empty())
-            .unwrap();
-        let response = app.clone().oneshot(request).await.expect("ERR");
-        new_level.id = Some(0);
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let body: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(body, json!(vec![new_level]));
-
         // Creating new tag
         let mut new_tag = model::Tag {
             id: Some(1),
-            level: 0,
+            parent: None,
             name: "Top tag".into(),
         };
         let request = Request::builder()
@@ -829,60 +704,29 @@ mod tests {
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let body: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(body, json!([]));
-
-        // delete level
-        let request = Request::builder()
-            .method("DELETE")
-            .uri("/levels/0")
-            .body(Body::empty())
-            .unwrap();
-        let response = app.clone().oneshot(request).await.expect("ERR");
-        assert_eq!(response.status(), StatusCode::OK);
-        let request = Request::builder()
-            .method("GET")
-            .uri("/levels")
-            .body(Body::empty())
-            .unwrap();
-        let response = app.clone().oneshot(request).await.expect("ERR");
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let body: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(body, json!([]));
     }
 
     #[tokio::test]
     async fn test_create_result_hashmap() {
-        let tag_levels: Vec<model::TagLevel> = vec![
-            model::TagLevel {
-                id: Some(0),
-                parent: None,
-                name: "root".into(),
-            },
-            model::TagLevel {
-                id: Some(1),
-                parent: Some(1),
-                name: "child".into(),
-            },
-        ];
         let tags: Vec<model::Tag> = vec![
             model::Tag {
                 id: Some(0),
-                level: 0,
+                parent: None,
                 name: "root_tag1".into(),
             },
             model::Tag {
                 id: Some(1),
-                level: 0,
+                parent: None,
                 name: "root_tag2".into(),
             },
             model::Tag {
                 id: Some(2),
-                level: 1,
+                parent: Some(0),
                 name: "child_tag1".into(),
             },
             model::Tag {
                 id: Some(3),
-                level: 1,
+                parent: Some(0),
                 name: "child_tag2".into(),
             },
         ];
@@ -907,113 +751,123 @@ mod tests {
             },
             model::PeerTag {
                 peer_id: "1".into(),
-                tag_id: 1,
+                tag_id: 0,
             },
             model::PeerTag {
                 peer_id: "1".into(),
                 tag_id: 3,
             },
         ];
-        let (levels, peers_with_tags) = _create_result_hashmap(peers, tags, tag_levels, peer_tags)
+        let (levels, peers_with_tags) = _create_result_hashmap(peers, tags.clone(), peer_tags)
             .await
             .expect("ERR");
-        let mut result_levels: HashMap<i32, HashMap<i32, BackendTag>> = HashMap::new();
-        let mut level_map: HashMap<i32, BackendTag> = HashMap::new();
-        level_map.insert(
+        let mut result_levels: HashMap<i32, BackendTag> = HashMap::new();
+        result_levels.insert(
             0,
             BackendTag {
                 values: HashMap::from([
-                    (0, model::StoreMetric::new_empty()),
                     (1, model::StoreMetric::new_empty()),
+                    (0, model::StoreMetric::new_empty()),
                 ]),
             },
         );
-        level_map.insert(
+        result_levels.insert(
             1,
             BackendTag {
                 values: HashMap::from([
-                    (1, model::StoreMetric::new_empty()),
                     (0, model::StoreMetric::new_empty()),
+                    (1, model::StoreMetric::new_empty()),
                 ]),
             },
         );
-        result_levels.insert(0, level_map);
-        let mut level_map: HashMap<i32, BackendTag> = HashMap::new();
-        level_map.insert(
+        result_levels.insert(
             2,
             BackendTag {
                 values: HashMap::from([
-                    (2, model::StoreMetric::new_empty()),
                     (3, model::StoreMetric::new_empty()),
+                    (2, model::StoreMetric::new_empty()),
                 ]),
             },
         );
-        level_map.insert(
+        result_levels.insert(
             3,
             BackendTag {
                 values: HashMap::from([
-                    (3, model::StoreMetric::new_empty()),
                     (2, model::StoreMetric::new_empty()),
+                    (3, model::StoreMetric::new_empty()),
                 ]),
             },
         );
-        result_levels.insert(1, level_map);
         assert_eq!(result_levels, levels);
-        let mut result_peer_with_tags: HashMap<String, HashMap<i32, i32>> = HashMap::new();
-        let peer_hashmap: HashMap<i32, i32> = HashMap::from([(0, 0), (1, 2)]);
-        result_peer_with_tags.insert("0".into(), peer_hashmap);
-        let peer_hashmap: HashMap<i32, i32> = HashMap::from([(0, 1), (1, 3)]);
-        result_peer_with_tags.insert("1".into(), peer_hashmap);
+        let mut result_peer_with_tags: HashMap<String, Vec<model::Tag>> = HashMap::new();
+        result_peer_with_tags.insert("0".into(), vec![tags[0].clone(), tags[2].clone()]);
+        result_peer_with_tags.insert("1".into(), vec![tags[0].clone(), tags[3].clone()]);
         assert_eq!(result_peer_with_tags, peers_with_tags);
     }
     #[tokio::test]
     async fn test_parse_output_metrics() {
-        let mut result_levels: HashMap<i32, HashMap<i32, BackendTag>> = HashMap::new();
-        let mut level_map: HashMap<i32, BackendTag> = HashMap::new();
-        level_map.insert(
+        let tags: Vec<model::Tag> = vec![
+            model::Tag {
+                id: Some(0),
+                parent: None,
+                name: "root_tag1".into(),
+            },
+            model::Tag {
+                id: Some(1),
+                parent: None,
+                name: "root_tag2".into(),
+            },
+            model::Tag {
+                id: Some(2),
+                parent: Some(0),
+                name: "child_tag1".into(),
+            },
+            model::Tag {
+                id: Some(3),
+                parent: Some(0),
+                name: "child_tag2".into(),
+            },
+        ];
+        let mut result_levels: HashMap<i32, BackendTag> = HashMap::new();
+        result_levels.insert(
             0,
             BackendTag {
                 values: HashMap::from([
-                    (0, model::StoreMetric::new_empty()),
                     (1, model::StoreMetric::new_empty()),
+                    (0, model::StoreMetric::new_empty()),
                 ]),
             },
         );
-        level_map.insert(
+        result_levels.insert(
             1,
             BackendTag {
                 values: HashMap::from([
-                    (1, model::StoreMetric::new_empty()),
                     (0, model::StoreMetric::new_empty()),
+                    (1, model::StoreMetric::new_empty()),
                 ]),
             },
         );
-        result_levels.insert(0, level_map);
-        let mut level_map: HashMap<i32, BackendTag> = HashMap::new();
-        level_map.insert(
+        result_levels.insert(
             2,
             BackendTag {
                 values: HashMap::from([
-                    (2, model::StoreMetric::new_empty()),
                     (3, model::StoreMetric::new_empty()),
+                    (2, model::StoreMetric::new_empty()),
                 ]),
             },
         );
-        level_map.insert(
+        result_levels.insert(
             3,
             BackendTag {
                 values: HashMap::from([
-                    (3, model::StoreMetric::new_empty()),
                     (2, model::StoreMetric::new_empty()),
+                    (3, model::StoreMetric::new_empty()),
                 ]),
             },
         );
-        result_levels.insert(1, level_map);
-        let mut result_peer_with_tags: HashMap<String, HashMap<i32, i32>> = HashMap::new();
-        let peer_hashmap: HashMap<i32, i32> = HashMap::from([(0, 0), (1, 2)]);
-        result_peer_with_tags.insert("0".into(), peer_hashmap);
-        let peer_hashmap: HashMap<i32, i32> = HashMap::from([(0, 1), (1, 3)]);
-        result_peer_with_tags.insert("1".into(), peer_hashmap);
+        let mut result_peer_with_tags: HashMap<String, Vec<model::Tag>> = HashMap::new();
+        result_peer_with_tags.insert("0".into(), vec![tags[0].clone(), tags[2].clone()]);
+        result_peer_with_tags.insert("1".into(), vec![tags[0].clone(), tags[3].clone()]);
         let mut local_metrics: HashMap<String, HashMap<String, model::StoreMetric>> =
             HashMap::new();
         let mut levels = result_levels.clone();
@@ -1042,76 +896,46 @@ mod tests {
             });
         });
         _parse_output_metrics(&local_metrics, result_peer_with_tags, &mut levels);
-        result_levels.entry(1).and_modify(|x| {
-            x.entry(3).and_modify(|y| {
-                y.values.entry(2).and_modify(|z| {
-                    z.ts = levels
-                        .get(&1)
-                        .unwrap()
-                        .get(&3)
-                        .unwrap()
-                        .values
-                        .get(&2)
-                        .unwrap()
-                        .ts;
-                    z.jitter_stddev = 1.0;
-                    z.jitter_max = 1.0;
-                    z.jitter_min = 1.0;
-                });
+        result_levels.entry(3).and_modify(|x| {
+            x.values.entry(2).and_modify(|z| {
+                z.ts = levels
+                    .get(&3)
+                    .unwrap()
+                    .values
+                    .get(&2)
+                    .unwrap()
+                    .ts;
+                z.jitter_stddev = 1.0;
+                z.jitter_max = 1.0;
+                z.jitter_min = 1.0;
             });
         });
-        result_levels.entry(1).and_modify(|x| {
-            x.entry(2).and_modify(|y| {
-                y.values.entry(3).and_modify(|z| {
-                    z.ts = levels
-                        .get(&1)
-                        .unwrap()
-                        .get(&2)
-                        .unwrap()
-                        .values
-                        .get(&3)
-                        .unwrap()
-                        .ts;
-                    z.jitter_stddev = 2.0;
-                    z.jitter_max = 2.0;
-                    z.jitter_min = 1.0;
-                });
+        result_levels.entry(2).and_modify(|x| {
+            x.values.entry(3).and_modify(|z| {
+                z.ts = levels
+                    .get(&2)
+                    .unwrap()
+                    .values
+                    .get(&3)
+                    .unwrap()
+                    .ts;
+                z.jitter_stddev = 2.0;
+                z.jitter_max = 2.0;
+                z.jitter_min = 1.0;
             });
         });
         result_levels.entry(0).and_modify(|x| {
-            x.entry(0).and_modify(|y| {
-                y.values.entry(1).and_modify(|z| {
-                    z.ts = levels
-                        .get(&0)
-                        .unwrap()
-                        .get(&0)
-                        .unwrap()
-                        .values
-                        .get(&1)
-                        .unwrap()
-                        .ts;
-                    z.jitter_stddev = 2.0;
-                    z.jitter_max = 2.0;
-                    z.jitter_min = 1.0;
-                });
-            });
-        });
-        result_levels.entry(0).and_modify(|x| {
-            x.entry(1).and_modify(|y| {
-                y.values.entry(0).and_modify(|z| {
-                    z.ts = levels
-                        .get(&0)
-                        .unwrap()
-                        .get(&1)
-                        .unwrap()
-                        .values
-                        .get(&0)
-                        .unwrap()
-                        .ts;
-                    z.jitter_stddev = 1.0;
-                    z.jitter_max = 1.0;
-                    z.jitter_min = 1.0;
-                });
+            x.values.entry(0).and_modify(|z| {
+                z.ts = levels
+                    .get(&0)
+                    .unwrap()
+                    .values
+                    .get(&0)
+                    .unwrap()
+                    .ts;
+                z.jitter_stddev = 1.5;
+                z.jitter_max = 2.0;
+                z.jitter_min = 1.0;
             });
         });
         assert_eq!(levels, result_levels);
