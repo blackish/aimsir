@@ -269,6 +269,7 @@ impl PeerController {
             if stat.count > 0 {
                 stat.jitter_stddev /= stat.count as f64;
             };
+            log::debug!("Aggregate: {} {} {} {} {}", stat.id, stat.pl, stat.jitter_stddev, stat.jitter_max, stat.jitter_min);
             result.push(stat);
         }
         return result;

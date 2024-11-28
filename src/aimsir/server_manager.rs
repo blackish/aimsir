@@ -85,6 +85,7 @@ async fn metric_processor(
 #[tonic::async_trait]
 impl aimsir_service_server::AimsirService for ServerController {
     type RegisterStream = ReceiverStream<Result<aimsir::PeerUpdate, tonic::Status>>;
+    type MetricsStream = ReceiverStream<Result<aimsir::MetricResponse, tonic::Status>>;
     // Got new peer
     async fn register(
         &self,
@@ -214,16 +215,21 @@ impl aimsir_service_server::AimsirService for ServerController {
     async fn metrics(
         &self,
         request: tonic::Request<tonic::Streaming<aimsir::MetricMessage>>,
-    ) -> std::result::Result<tonic::Response<aimsir::MetricResponse>, tonic::Status> {
+    ) -> std::result::Result<tonic::Response<Self::MetricsStream>, tonic::Status> {
+        let (tx, rx) = mpsc::channel(1);
         let mut metric_stream = request.into_inner();
-        while let Some(metric) = metric_stream.next().await {
-            if let Ok(metric) = metric {
-                for single_metric in metric.metric {
-                    let _ = self.metric_tx.send(single_metric).await;
-                }
+        let metric_tx = self.metric_tx.clone();
+        tokio::spawn(async move {
+            while let Some(metric) = metric_stream.next().await {
+                if let Ok(metric) = metric {
+                    for single_metric in metric.metric {
+                        let _ = metric_tx.send(single_metric).await;
+                    }
+                };
+                _ = tx.send(Ok(aimsir::MetricResponse { ok: true })).await;
             }
-        }
-        Ok(tonic::Response::new(aimsir::MetricResponse { ok: true }))
+        });
+        Ok(tonic::Response::new(ReceiverStream::new(rx)))
     }
 }
 
