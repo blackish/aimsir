@@ -129,38 +129,40 @@ async fn metric_composer(
     let (tx, mut rx) = channel::<Sender<MetricMessage>>(1);
 
     tokio::spawn(async move {
-        while let Some(sender) = rx.recv().await {
-            while let Some(res_vec) = meas_rx.recv().await {
-                let mut metric_vec: Vec<Metric> = Vec::new();
-                for single_res in res_vec {
-                    log::trace!("New metric for {}", single_res.id.to_string());
-                    metric_vec.push(Metric {
-                        metric_type: MetricType::from_str_name("PL").unwrap() as i32,
-                        value: single_res.pl as f32,
-                        local_id: local_id.clone(),
-                        peer_id: single_res.id.to_string(),
-                    });
-                    metric_vec.push(Metric {
-                        metric_type: MetricType::from_str_name("JitterStdDev").unwrap() as i32,
-                        value: single_res.jitter_stddev as f32,
-                        local_id: local_id.clone(),
-                        peer_id: single_res.id.to_string(),
-                    });
-                    metric_vec.push(Metric {
-                        metric_type: MetricType::from_str_name("JitterMin").unwrap() as i32,
-                        value: single_res.jitter_min as f32,
-                        local_id: local_id.clone(),
-                        peer_id: single_res.id.to_string(),
-                    });
-                    metric_vec.push(Metric {
-                        metric_type: MetricType::from_str_name("JitterMax").unwrap() as i32,
-                        value: single_res.jitter_max as f32,
-                        local_id: local_id.clone(),
-                        peer_id: single_res.id.to_string(),
-                    });
-                }
-                _ = sender.send(MetricMessage { metric: metric_vec }).await;
+        let mut sender = rx.recv().await.unwrap();
+        while let Some(res_vec) = meas_rx.recv().await {
+            let mut metric_vec: Vec<Metric> = Vec::new();
+            for single_res in res_vec {
+                log::trace!("New metric for {}", single_res.id.to_string());
+                metric_vec.push(Metric {
+                    metric_type: MetricType::from_str_name("PL").unwrap() as i32,
+                    value: single_res.pl as f32,
+                    local_id: local_id.clone(),
+                    peer_id: single_res.id.to_string(),
+                });
+                metric_vec.push(Metric {
+                    metric_type: MetricType::from_str_name("JitterStdDev").unwrap() as i32,
+                    value: single_res.jitter_stddev as f32,
+                    local_id: local_id.clone(),
+                    peer_id: single_res.id.to_string(),
+                });
+                metric_vec.push(Metric {
+                    metric_type: MetricType::from_str_name("JitterMin").unwrap() as i32,
+                    value: single_res.jitter_min as f32,
+                    local_id: local_id.clone(),
+                    peer_id: single_res.id.to_string(),
+                });
+                metric_vec.push(Metric {
+                    metric_type: MetricType::from_str_name("JitterMax").unwrap() as i32,
+                    value: single_res.jitter_max as f32,
+                    local_id: local_id.clone(),
+                    peer_id: single_res.id.to_string(),
+                });
             }
+            if sender.is_closed() {
+                sender = rx.recv().await.unwrap();
+            }
+            _ = sender.send(MetricMessage { metric: metric_vec }).await;
         }
     });
     loop {
