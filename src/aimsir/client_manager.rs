@@ -4,17 +4,65 @@ use crate::model::aimsir::{
     aimsir_service_client::AimsirServiceClient, Metric, MetricMessage, MetricType,
 };
 use crate::peers_controller;
-use async_stream::stream;
+// use async_stream::stream;
 use log;
+use core::panic;
+use std::sync::Arc;
 use tokio::{
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        Mutex,
+    },
     task::JoinSet,
 };
+use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 use tonic::{transport, Request, Streaming};
 
 pub struct ManagerController {
     handles: JoinSet<()>,
+}
+
+pub struct GRPCClient {
+    uri: String,
+    client: Arc<Mutex<Option<AimsirServiceClient<transport::Channel>>>>,
+}
+
+impl GRPCClient {
+    pub async fn new(uri: String) -> Self {
+        let client = Arc::new(Mutex::new(None));
+        Self { uri, client }
+    }
+
+    // Method to get the client when it's ready
+    pub async fn get_client(
+        &self,
+    ) -> AimsirServiceClient<transport::Channel> {
+        // Wait until the client is available
+        let mut client_lock = self.client.lock().await;
+        loop {
+            if let Some(ref orig_client) = *client_lock {
+                let mut client = orig_client.clone();
+                if let Ok(_) = client.ping(Request::new(())).await {
+                    return client;
+                }
+            }
+            log::debug!("Reconnecting to server");
+            match transport::Endpoint::from_shared(self.uri.clone())
+                .unwrap()
+                .connect()
+                .await
+            {
+                Ok(channel) => {
+                    let aimsir_client = AimsirServiceClient::new(channel);
+                    *client_lock = Some(aimsir_client);
+                }
+                Err(e) => {
+                    log::error!("Failed to create endpoint: {}", e);
+                }
+            }
+        }
+    }
 }
 
 impl ManagerController {
@@ -24,7 +72,7 @@ impl ManagerController {
         ipaddress: Box<str>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         log::info!("Starting manager");
-        let mut client = AimsirServiceClient::connect(String::from(uri)).await?;
+        let client_handler = Arc::new(Mutex::new(GRPCClient::new(uri.to_string()).await));
         log::debug!("Connected to server");
         let (meas_tx, meas_rx) = channel(10);
         let (peer_tx, peer_rx) = channel(10);
@@ -36,7 +84,8 @@ impl ManagerController {
             log::debug!("Spawning peer controller worker");
             peer_ctrl.work().await;
         });
-        let send_client = client.clone();
+        let send_client = client_handler.clone();
+        let subscribe_client = client_handler.clone();
         let local_id = String::from(id.clone());
         handles.spawn(async move {
             log::info!("Spawning metric composer");
@@ -45,19 +94,21 @@ impl ManagerController {
         handles.spawn(async move {
             loop {
                 log::info!("Registering on the server");
-                if let Ok(clients) = client
-                    .register(Request::new(aimsir::Peer {
-                        id: id.to_string(),
-                        ipaddress: ipaddress.to_string(),
-                    }))
-                    .await
-                {
-                    log::info!("Spawning update processor");
-                    update_processor(peer_tx.clone(), clients.into_inner()).await
+                let mut register_client = subscribe_client.lock().await.get_client().await;
+                match register_client.register(Request::new(aimsir::Peer { id: id.to_string(), ipaddress: ipaddress.to_string()})).await {
+                    Ok(clients) => {
+                        log::info!("Spawning update processor");
+                        update_processor(peer_tx.clone(), clients.into_inner()).await;
+                    },
+                    Err(_) => {
+                        log::error!("Failed to register");
+                    }
                 }
             }
         });
-        Ok(Self { handles })
+        Ok(Self {
+            handles,
+        })
     }
 
     pub async fn worker(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -72,68 +123,76 @@ impl ManagerController {
 async fn metric_composer(
     local_id: String,
     mut meas_rx: Receiver<Vec<model::Measurement>>,
-    mut client: AimsirServiceClient<transport::Channel>,
+    client: Arc<Mutex<GRPCClient>>,
 ) {
     log::debug!("Start sending metrics");
-    let metric_stream = stream! {
-        while let Some(res_vec) = meas_rx.recv().await {
-            let mut metric_vec: Vec<Metric> = Vec::new();
-            for single_res in res_vec {
-                log::trace!("New metric for {}", single_res.id.to_string());
-                metric_vec.push(
-                    Metric{
+    let (tx, mut rx) = channel::<Sender<MetricMessage>>(1);
+
+    tokio::spawn(async move {
+        while let Some(sender) = rx.recv().await {
+            while let Some(res_vec) = meas_rx.recv().await {
+                let mut metric_vec: Vec<Metric> = Vec::new();
+                for single_res in res_vec {
+                    log::trace!("New metric for {}", single_res.id.to_string());
+                    metric_vec.push(Metric {
                         metric_type: MetricType::from_str_name("PL").unwrap() as i32,
                         value: single_res.pl as f32,
                         local_id: local_id.clone(),
-                        peer_id: single_res.id.to_string()
-                    }
-                );
-                metric_vec.push(
-                    Metric{
+                        peer_id: single_res.id.to_string(),
+                    });
+                    metric_vec.push(Metric {
                         metric_type: MetricType::from_str_name("JitterStdDev").unwrap() as i32,
                         value: single_res.jitter_stddev as f32,
                         local_id: local_id.clone(),
-                        peer_id: single_res.id.to_string()
-                    }
-                );
-                metric_vec.push(
-                    Metric{
+                        peer_id: single_res.id.to_string(),
+                    });
+                    metric_vec.push(Metric {
                         metric_type: MetricType::from_str_name("JitterMin").unwrap() as i32,
                         value: single_res.jitter_min as f32,
                         local_id: local_id.clone(),
-                        peer_id: single_res.id.to_string()
-                    }
-                );
-                metric_vec.push(
-                    Metric{
+                        peer_id: single_res.id.to_string(),
+                    });
+                    metric_vec.push(Metric {
                         metric_type: MetricType::from_str_name("JitterMax").unwrap() as i32,
                         value: single_res.jitter_max as f32,
                         local_id: local_id.clone(),
-                        peer_id: single_res.id.to_string()
-                    }
-                );
+                        peer_id: single_res.id.to_string(),
+                    });
+                }
+                _ = sender.send(MetricMessage { metric: metric_vec }).await;
             }
-            yield MetricMessage{
-                metric: metric_vec
-            };
         }
-    };
-    match client.metrics(Request::new(metric_stream)).await {
-        Ok(response) => {
-            let mut response_stream = response.into_inner();
-            while let Some(received) = response_stream.next().await {
-                match received {
-                    Ok(result) => {
-                        log::debug!("Metric sent: {}", result.ok);
-                    },
-                    Err(err) => {
-                        log::warn!("Failed to send metric: {}", err);
+    });
+    loop {
+        log::debug!("Waiting for server connection");
+        let mut metric_client = client.lock().await.get_client().await;
+        let (metric_tx, metric_rx) = channel(1);
+        log::debug!("Sending handler to metric generator");
+        if let Err(e) = tx.send(metric_tx).await {
+            panic!("Metric sender thread paniced: {}", e);
+        }
+        log::debug!("Calling server");
+        match metric_client
+            .metrics(Request::new(ReceiverStream::new(metric_rx)))
+            .await
+        {
+            Ok(response) => {
+                let mut response_stream = response.into_inner();
+                while let Some(received) = response_stream.next().await {
+                    match received {
+                        Ok(result) => {
+                            log::debug!("Metric sent: {}", result.ok);
+                        }
+                        Err(err) => {
+                            log::warn!("Failed to send metric: {}", err);
+                        }
                     }
                 }
+                log::debug!("Log sender exited");
             }
-        }
-        Err(e) => {
-            log::error!("Failed to connect to metric: {}", e.to_string());
+            Err(e) => {
+                log::error!("Failed to connect to metric: {}", e.to_string());
+            }
         }
     }
 }
@@ -142,20 +201,19 @@ async fn update_processor(
     peer_tx: Sender<model::NeighbourUpdate>,
     mut client: Streaming<model::aimsir::PeerUpdate>,
 ) {
-    loop {
-        if let Ok(peer_update) = client.message().await {
-            if let Some(update) = peer_update {
-                log::trace!("Neighgor update");
-                let new_update = model::NeighbourUpdate {
-                    aggregate_timer: update.aggregate_interval as u64,
-                    probe_timer: update.probe_interval as u64,
-                    update_type: model::UpdateType::from_proto(update.update_type).unwrap(),
-                    update: update.update,
-                };
-                let _ = peer_tx.send(new_update).await;
-            }
-        };
+    while let Ok(peer_update) = client.message().await {
+        if let Some(update) = peer_update {
+            log::trace!("Neighgor update");
+            let new_update = model::NeighbourUpdate {
+                aggregate_timer: update.aggregate_interval as u64,
+                probe_timer: update.probe_interval as u64,
+                update_type: model::UpdateType::from_proto(update.update_type).unwrap(),
+                update: update.update,
+            };
+            let _ = peer_tx.send(new_update).await;
+        }
     }
+    log::debug!("Update processor exited");
 }
 #[cfg(test)]
 mod tests {
@@ -174,6 +232,12 @@ mod tests {
     impl AimsirService for TestServer {
         type RegisterStream = ReceiverStream<Result<model::aimsir::PeerUpdate, tonic::Status>>;
         type MetricsStream = ReceiverStream<Result<aimsir::MetricResponse, tonic::Status>>;
+        async fn ping(
+            &self,
+            _request: tonic::Request<()>,
+        ) -> std::result::Result<tonic::Response<()>, tonic::Status> {
+            Ok(tonic::Response::new(()))
+        }
         async fn metrics(
             &self,
             request: tonic::Request<tonic::Streaming<aimsir::MetricMessage>>,
@@ -279,9 +343,10 @@ mod tests {
                 .await;
         });
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-        let client = AimsirServiceClient::connect(String::from("http://127.0.0.1:10000"))
-            .await
-            .unwrap();
+        let client = Arc::new(Mutex::new(GRPCClient::new(String::from("http://127.0.0.1:10000")).await));
+        // let client = AimsirServiceClient::connect(String::from("http://127.0.0.1:10000"))
+            // .await
+            // .unwrap();
         tokio::spawn(async move {
             super::metric_composer("0".into(), probe_rx, client).await;
         });

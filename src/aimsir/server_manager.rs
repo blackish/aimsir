@@ -86,6 +86,12 @@ async fn metric_processor(
 impl aimsir_service_server::AimsirService for ServerController {
     type RegisterStream = ReceiverStream<Result<aimsir::PeerUpdate, tonic::Status>>;
     type MetricsStream = ReceiverStream<Result<aimsir::MetricResponse, tonic::Status>>;
+    async fn ping(
+        &self,
+        _request: tonic::Request<()>,
+    ) -> std::result::Result<tonic::Response<()>, tonic::Status> {
+        Ok(tonic::Response::new(()))
+    }
     // Got new peer
     async fn register(
         &self,

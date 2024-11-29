@@ -351,6 +351,12 @@ mod tests {
     impl AimsirService for TestServer {
         type RegisterStream = ReceiverStream<Result<model::aimsir::PeerUpdate, tonic::Status>>;
         type MetricsStream = ReceiverStream<Result<model::aimsir::MetricResponse, tonic::Status>>;
+        async fn ping(
+            &self,
+            _request: tonic::Request<()>,
+        ) -> std::result::Result<tonic::Response<()>, tonic::Status> {
+            Ok(tonic::Response::new(()))
+        }
         async fn metrics(
             &self,
             _request: tonic::Request<tonic::Streaming<model::aimsir::MetricMessage>>,
