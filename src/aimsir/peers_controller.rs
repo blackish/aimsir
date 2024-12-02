@@ -141,10 +141,16 @@ impl PeerController {
                                     let latency = (current_ts as u64) - peer_msg.ts;
                                     if entry.last_latency < u64::MAX {
                                         let jitter = (latency as f64 - entry.last_latency as f64).abs();
+                                        let mut pl : u64 = 0;
+                                        if entry.last_seq > peer_msg.seq {
+                                            pl += (peer_msg.seq - 1) as u64;
+                                        } else {
+                                            pl += (peer_msg.seq - entry.last_seq - 1) as u64;
+                                        }
                                         peer_stats.entry(peer_msg.id.to_string())
                                         .and_modify(|stat_entry|
                                             {
-                                                stat_entry.pl += (peer_msg.seq - entry.last_seq - 1) as u64;
+                                                stat_entry.pl = pl;
                                                 stat_entry.count += 1;
                                                 stat_entry.jitter_stddev += jitter.abs();
                                                 if jitter > stat_entry.jitter_max {
@@ -159,7 +165,7 @@ impl PeerController {
                                                     let mut new_entry = model::Measurement{
                                                         id: peer_msg.id.clone(),
                                                         count: 1,
-                                                        pl: (peer_msg.seq - entry.last_seq - 1) as u64,
+                                                        pl: pl,
                                                         jitter_stddev: jitter,
                                                         jitter_min: jitter,
                                                         jitter_max: jitter
