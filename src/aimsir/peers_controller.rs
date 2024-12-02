@@ -143,7 +143,7 @@ impl PeerController {
                                         let jitter = (latency as f64 - entry.last_latency as f64).abs();
                                         let pl : u64;
                                         if entry.last_seq > peer_msg.seq {
-                                            pl = (peer_msg.seq - 1) as u64;
+                                            pl = peer_msg.seq as u64;
                                         } else {
                                             pl = (peer_msg.seq - entry.last_seq - 1) as u64;
                                         }
