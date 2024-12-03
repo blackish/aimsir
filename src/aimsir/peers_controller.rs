@@ -150,7 +150,12 @@ impl PeerController {
                                         peer_stats.entry(peer_msg.id.to_string())
                                         .and_modify(|stat_entry|
                                             {
-                                                stat_entry.pl += pl;
+                                                let estimate_pl = (current_ts as u64 - last_aggregate_ts as u64)/(self.probe_timer * 1000);
+                                                if estimate_pl < pl {
+                                                    stat_entry.pl = estimate_pl;
+                                                } else {
+                                                    stat_entry.pl += pl;
+                                                }
                                                 stat_entry.count += 1;
                                                 stat_entry.jitter_stddev += jitter.abs();
                                                 if jitter > stat_entry.jitter_max {
