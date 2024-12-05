@@ -8,16 +8,16 @@ use std::net::IpAddr;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = clap::Command::new("aimsir-client")
         .version("0.0.1")
-        .arg(clap::arg!(id: -i --id <id> "node id").required(true))
-        .arg(clap::arg!(ip: -p --ip <ip> "node local ip").required(true))
-        .arg(clap::arg!(server: -s --server <server> "manager server").required(true))
+        .arg(clap::arg!(id: -i --id <id> "node id").required(true).env("AIMSIR_NODE_ID"))
+        .arg(clap::arg!(ip: -p --ip <ip> "node local ip").required(true).env("AIMSIR_LOCAL_IP"))
+        .arg(clap::arg!(server: -s --server <server> "manager server").required(true).env("AIMSIR_SERVER"))
         .arg(
             clap::arg!(loglevel: -l --loglevel <LOGLEVEL> "loglevel").value_parser([
                 clap::builder::PossibleValue::new("error"),
                 clap::builder::PossibleValue::new("warn"),
                 clap::builder::PossibleValue::new("info"),
                 clap::builder::PossibleValue::new("debug"),
-            ]),
+            ]).env("AIMSIR_LOGLEVEL"),
         )
         .get_matches();
     match app
