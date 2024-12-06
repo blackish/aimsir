@@ -11,6 +11,7 @@ use axum::{
     routing::{delete, get, post},
     Router,
 };
+use tower_http::cors::{Any, CorsLayer};
 use clap;
 use log;
 use simple_logger;
@@ -102,6 +103,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await;
     });
     let node_ip: String = app.get_one::<String>("ip").unwrap().to_string();
+    let cors = CorsLayer::new()
+        .allow_origin(Any) // Allows any origin
+        .allow_methods(Any) // Allows any HTTP method
+        .allow_headers(Any); // Allows any header
     let web_app = Router::new()
         .route("/stats", get(stats))
         .route("/stats/:statid", get(stats_id))
@@ -118,7 +123,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             metrics: metrics.clone(),
             db: Arc::new(RwLock::new(model::mysql::MysqlDb::new(db).await?)),
             grpc_server: Arc::new(RwLock::new(format!("http://{}", node_ip))),
-        });
+        })
+        .layer(cors); // Add the CORS middleware;
     tokio::spawn(async move {
         let _ = render_results(input_metrics, parse_db, reconcile_time, metrics).await;
     });
