@@ -133,17 +133,17 @@ impl PeerController {
             select! {
                 res = self.peer_receiver.recv() => {
                     if let Some(peer_msg) = res {
+                        let current_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+                        let latency: u64;
+                        if current_ts > peer_msg.ts {
+                            latency = (current_ts as u64) - peer_msg.ts;
+                        } else {
+                            latency = peer_msg.ts - (current_ts as u64);
+                        };
                         self.peers
                             .entry(peer_msg.id.to_string())
                             .and_modify(|entry|
                                 {
-                                    let current_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-                                    let latency: u64;
-                                    if current_ts > peer_msg.ts {
-                                        latency = (current_ts as u64) - peer_msg.ts;
-                                    } else {
-                                        latency = peer_msg.ts - (current_ts as u64);
-                                    }
                                     if entry.last_latency < u64::MAX {
                                         let jitter = (latency as f64 - entry.last_latency as f64).abs();
                                         let pl : u64;
@@ -189,7 +189,7 @@ impl PeerController {
                                                 }
                                             );
                                     }
-                                    entry.last_latency = current_ts as u64 - peer_msg.ts;
+                                    entry.last_latency = latency;
                                     entry.last_seq = peer_msg.seq;
                                     entry.last_seen = current_ts as u64;
                                 }
