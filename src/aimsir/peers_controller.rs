@@ -138,7 +138,12 @@ impl PeerController {
                             .and_modify(|entry|
                                 {
                                     let current_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-                                    let latency = (current_ts as u64) - peer_msg.ts;
+                                    let latency: u64;
+                                    if current_ts > peer_msg.ts {
+                                        latency = (current_ts as u64) - peer_msg.ts;
+                                    } else {
+                                        latency = peer_msg.ts - (current_ts as u64);
+                                    }
                                     if entry.last_latency < u64::MAX {
                                         let jitter = (latency as f64 - entry.last_latency as f64).abs();
                                         let pl : u64;
