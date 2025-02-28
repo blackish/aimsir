@@ -250,8 +250,8 @@ impl PeerController {
                     }
                 },
                 _res = aggregate_timer.tick() => {
-                    last_aggregate_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
                     let result = self.make_aggregate(&mut peer_stats, last_aggregate_ts as u64);
+                    last_aggregate_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
                     if !self.test {
                         let _ = self.manager_sender.send(result).await;
                     };
@@ -265,8 +265,14 @@ impl PeerController {
         ts: u64,
     ) -> Vec<model::Measurement> {
         let mut result = Vec::new();
+        let last_aggregate_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
         for peer in self.peers.values() {
-            let last_stat_ts = (ts as u64 - peer.last_seen) / (1000 * self.probe_timer);
+            let last_stat_ts: u64;
+            if last_aggregate_ts > peer.last_seen {
+                last_stat_ts = (ts as u64 - last_aggregate_ts) / (1000 * self.probe_timer);
+            } else {
+                last_stat_ts = (ts as u64 - peer.last_seen) / (1000 * self.probe_timer);
+            }
             let mut stat = peer_stats
                 .remove(&peer.peer.id)
                 .unwrap_or(model::PeerMeasurement {
@@ -277,9 +283,6 @@ impl PeerController {
             if last_stat_ts > 0 {
                 stat.pl += last_stat_ts as u64;
             }
-            if stat.count > 0 {
-                stat.jitter_stddev /= stat.count as f64;
-            };
             log::debug!(
                 "Aggregate: {} {} {} {} {}",
                 stat.id,

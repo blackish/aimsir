@@ -22,7 +22,7 @@ async fn peers_measurements(peers_num: usize) {
             ipaddress: "127.0.0.1".into(),
         })
     }
-    let mut measurements: HashMap<String, model::Measurement> = HashMap::new();
+    let mut measurements: HashMap<String, model::PeerMeasurement> = HashMap::new();
     let ctrl =
         peers_controller::PeerController::new("0".into(), 3600, 36000, rx, mgr_tx, true).await;
     let _ = tx.send(neighbour_update).await;

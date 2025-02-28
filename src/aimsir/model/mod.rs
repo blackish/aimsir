@@ -74,7 +74,7 @@ impl PeerMeasurement {
             .fold(0.0, |acc, x| acc + ((x - avg) * (x - avg)))
             / count)
             .sqrt();
-        self.jitters.iter().map(|x| {
+        self.jitters.iter().for_each(|x| {
             if *x < jitter_min || jitter_min == -1.0 {
                 jitter_min = x.clone();
             }

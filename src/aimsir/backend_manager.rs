@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use std::{
     collections::HashMap,
     sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 use tokio::{self, sync::RwLock, time as async_time};
 
@@ -258,10 +258,10 @@ fn _parse_output_metrics(
     peers_with_tags: HashMap<String, Vec<model::Tag>>,
     levels: &mut HashMap<i32, BackendTag>,
 ) {
-    let ts = SystemTime::now()
+/*     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
-        .as_millis() as u64;
+        .as_millis() as u64; */
     for (key, metric) in local_metrics {
         let dst = key;
         for (src, vals) in metric {
@@ -273,7 +273,9 @@ fn _parse_output_metrics(
                         if let Some(dst_id) = dst_tag.id {
                             levels.entry(src_id).and_modify(|x| {
                                 x.values.entry(dst_id).and_modify(|z| {
-                                    z.ts = ts.clone();
+                                    if z.ts < vals.ts {
+                                        z.ts = vals.ts.clone();
+                                    }
                                     z.pl += vals.pl;
                                     if z.jitter_min == -1.0 || z.jitter_min > vals.jitter_min {
                                         z.jitter_min = vals.jitter_min;
