@@ -122,7 +122,7 @@ impl PeerController {
         }
     }
     pub async fn work(&mut self) {
-        let mut peer_stats: HashMap<String, model::Measurement> = HashMap::new();
+        let mut peer_stats: HashMap<String, model::PeerMeasurement> = HashMap::new();
         let mut last_aggregate_ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -144,6 +144,13 @@ impl PeerController {
                             .entry(peer_msg.id.to_string())
                             .and_modify(|entry|
                                 {
+                                    let current_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+                                    let latency: u64;
+                                    if current_ts > peer_msg.ts {
+                                        latency = current_ts - peer_msg.ts;
+                                    } else {
+                                        latency = (current_ts as u64) - peer_msg.ts;
+                                    }
                                     if entry.last_latency < u64::MAX {
                                         let jitter = (latency as f64 - entry.last_latency as f64).abs();
                                         let pl : u64;
@@ -161,24 +168,13 @@ impl PeerController {
                                                 } else {
                                                     stat_entry.pl += pl;
                                                 }
-                                                stat_entry.count += 1;
-                                                stat_entry.jitter_stddev += jitter.abs();
-                                                if jitter > stat_entry.jitter_max {
-                                                    stat_entry.jitter_max = jitter;
-                                                }
-                                                if jitter < stat_entry.jitter_min || stat_entry.jitter_min == 0.0 {
-                                                    stat_entry.jitter_min = jitter;
-                                                }
+                                                stat_entry.jitters.push(jitter.abs());
                                                 log::debug!("Got probe from: {}. jitter: {}, pl: {}", peer_msg.id, jitter, stat_entry.pl);
                                             }).or_insert_with(||
                                                 {
-                                                    let mut new_entry = model::Measurement{
-                                                        id: peer_msg.id.clone(),
-                                                        count: 1,
+                                                    let mut new_entry = model::PeerMeasurement{
                                                         pl: pl,
-                                                        jitter_stddev: jitter,
-                                                        jitter_min: jitter,
-                                                        jitter_max: jitter
+                                                        jitters: vec![jitter]
                                                     };
                                                     if new_entry.pl > 1 {
                                                         let estimate_pl = (current_ts as u64 - last_aggregate_ts as u64)/(self.probe_timer * 1000);
@@ -261,8 +257,8 @@ impl PeerController {
                     }
                 },
                 _res = aggregate_timer.tick() => {
-                    last_aggregate_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
                     let result = self.make_aggregate(&mut peer_stats, last_aggregate_ts as u64);
+                    last_aggregate_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
                     if !self.test {
                         let _ = self.manager_sender.send(result).await;
                     };
@@ -272,29 +268,36 @@ impl PeerController {
     }
     pub fn make_aggregate(
         &self,
-        peer_stats: &mut HashMap<String, model::Measurement>,
+        peer_stats: &mut HashMap<String, model::PeerMeasurement>,
         ts: u64,
     ) -> Vec<model::Measurement> {
         let mut result = Vec::new();
+        let last_aggregate_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
         for peer in self.peers.values() {
-            let last_stat_ts = (ts as u64 - peer.last_seen) / (1000 * self.probe_timer);
+            let last_stat_ts: u64;
+            if last_aggregate_ts > peer.last_seen {
+                last_stat_ts = (ts as u64 - last_aggregate_ts) / (1000 * self.probe_timer);
+            } else {
+                last_stat_ts = (ts as u64 - peer.last_seen) / (1000 * self.probe_timer);
+            }
             let mut stat = peer_stats
                 .remove(&peer.peer.id)
-                .unwrap_or(model::Measurement {
-                    id: peer.peer.id.clone().into(),
-                    count: 0,
+                .unwrap_or(model::PeerMeasurement {
                     pl: 0,
-                    jitter_stddev: 0.0,
-                    jitter_min: 0.0,
-                    jitter_max: 0.0,
-                });
+                    jitters: Vec::new(),
+                })
+                .make_measurement(peer.peer.id.clone().into());
             if last_stat_ts > 0 {
                 stat.pl += last_stat_ts as u64;
             }
-            if stat.count > 0 {
-                stat.jitter_stddev /= stat.count as f64;
-            };
-            log::debug!("Aggregate: {} {} {} {} {}", stat.id, stat.pl, stat.jitter_stddev, stat.jitter_max, stat.jitter_min);
+            log::debug!(
+                "Aggregate: {} {} {} {} {}",
+                stat.id,
+                stat.pl,
+                stat.jitter_stddev,
+                stat.jitter_max,
+                stat.jitter_min
+            );
             result.push(stat);
         }
         return result;

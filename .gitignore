@@ -1,3 +1,4 @@
 /target
 diesel.sqlite
+.vscode
 .DS_Store

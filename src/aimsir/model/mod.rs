@@ -56,6 +56,43 @@ pub struct Measurement {
     pub jitter_max: f64,
 }
 
+#[derive(Debug)]
+pub struct PeerMeasurement {
+    pub pl: u64,
+    pub jitters: Vec<f64>,
+}
+
+impl PeerMeasurement {
+    pub fn make_measurement(&self, peer_id: String) -> Measurement {
+        let mut jitter_min: f64 = -1.0;
+        let mut jitter_max: f64 = -1.0;
+        let count: f64 = self.jitters.len() as f64;
+        let avg: f64 = self.jitters.iter().fold(0.0, |acc, x| acc + x) / count;
+        let jitter_stddev: f64 = (self
+            .jitters
+            .iter()
+            .fold(0.0, |acc, x| acc + ((x - avg) * (x - avg)))
+            / count)
+            .sqrt();
+        self.jitters.iter().for_each(|x| {
+            if *x < jitter_min || jitter_min == -1.0 {
+                jitter_min = x.clone();
+            }
+            if *x > jitter_max || jitter_max == -1.0 {
+                jitter_max = x.clone();
+            }
+        });
+        Measurement {
+            id: peer_id,
+            count: count as u16,
+            pl: self.pl,
+            jitter_stddev: jitter_stddev,
+            jitter_min: jitter_min,
+            jitter_max: jitter_max,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Probe {
     pub id: String,
