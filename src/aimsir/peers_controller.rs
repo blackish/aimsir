@@ -275,10 +275,10 @@ impl PeerController {
         let last_aggregate_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
         for peer in self.peers.values() {
             let last_stat_ts: u64;
-            if last_aggregate_ts > peer.last_seen {
-                last_stat_ts = (ts as u64 - last_aggregate_ts) / (1000 * self.probe_timer);
+            if ts > peer.last_seen {
+                last_stat_ts = (last_aggregate_ts - ts) / (1000 * self.probe_timer);
             } else {
-                last_stat_ts = (ts as u64 - peer.last_seen) / (1000 * self.probe_timer);
+                last_stat_ts = (peer.last_seen - ts) / (1000 * self.probe_timer);
             }
             let mut stat = peer_stats
                 .remove(&peer.peer.id)
