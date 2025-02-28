@@ -133,6 +133,13 @@ impl PeerController {
             select! {
                 res = self.peer_receiver.recv() => {
                     if let Some(peer_msg) = res {
+                        let current_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+                        let latency: u64;
+                        if current_ts > peer_msg.ts {
+                            latency = (current_ts as u64) - peer_msg.ts;
+                        } else {
+                            latency = peer_msg.ts - (current_ts as u64);
+                        };
                         self.peers
                             .entry(peer_msg.id.to_string())
                             .and_modify(|entry|
