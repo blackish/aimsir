@@ -145,12 +145,6 @@ impl PeerController {
                             .and_modify(|entry|
                                 {
                                     let current_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-                                    let latency: u64;
-                                    if current_ts > peer_msg.ts {
-                                        latency = current_ts - peer_msg.ts;
-                                    } else {
-                                        latency = (current_ts as u64) - peer_msg.ts;
-                                    }
                                     if entry.last_latency < u64::MAX {
                                         let jitter = (latency as f64 - entry.last_latency as f64).abs();
                                         let pl : u64;
@@ -169,7 +163,8 @@ impl PeerController {
                                                     stat_entry.pl += pl;
                                                 }
                                                 stat_entry.jitters.push(jitter.abs());
-                                                log::debug!("Got probe from: {}. jitter: {}, pl: {}", peer_msg.id, jitter, stat_entry.pl);
+                                                // log::debug!("Got probe from: {}. jitter: {}, pl: {}", peer_msg.id, jitter, stat_entry.pl);
+                                                log::debug!("Got probe from: {}. jitter: {}, pl: {}, latency: {}, local ts: {}, remote ts: {}", peer_msg.id, jitter, stat_entry.pl, latency, current_ts, peer_msg.ts);
                                             }).or_insert_with(||
                                                 {
                                                     let mut new_entry = model::PeerMeasurement{
@@ -180,7 +175,7 @@ impl PeerController {
                                                         let estimate_pl = (current_ts as u64 - last_aggregate_ts as u64)/(self.probe_timer * 1000);
                                                         new_entry.pl = estimate_pl as u64;
                                                     };
-                                                    log::debug!("Got probe from: {}. jitter: {}, pl: {}", peer_msg.id, jitter, new_entry.pl);
+                                                    log::debug!("Got probe from: {}. jitter: {}, pl: {}, latency: {}, local ts: {}, remote ts: {}", peer_msg.id, jitter, new_entry.pl, latency, current_ts, peer_msg.ts);
                                                     new_entry
                                                 }
                                             );

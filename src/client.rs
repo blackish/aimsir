@@ -2,22 +2,30 @@ use aimsir;
 use clap;
 use log;
 use simple_logger;
-use std::net::IpAddr;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = clap::Command::new("aimsir-client")
         .version("0.0.1")
-        .arg(clap::arg!(id: -i --id <id> "node id").required(true).env("AIMSIR_NODE_ID"))
-        .arg(clap::arg!(ip: -p --ip <ip> "node local ip").required(true).env("AIMSIR_LOCAL_IP"))
-        .arg(clap::arg!(server: -s --server <server> "manager server").required(true).env("AIMSIR_SERVER"))
         .arg(
-            clap::arg!(loglevel: -l --loglevel <LOGLEVEL> "loglevel").value_parser([
-                clap::builder::PossibleValue::new("error"),
-                clap::builder::PossibleValue::new("warn"),
-                clap::builder::PossibleValue::new("info"),
-                clap::builder::PossibleValue::new("debug"),
-            ]).env("AIMSIR_LOGLEVEL"),
+            clap::arg!(id: -i --id <id> "node id")
+                .required(true)
+                .env("AIMSIR_NODE_ID"),
+        )
+        .arg(
+            clap::arg!(server: -s --server <server> "manager server")
+                .required(true)
+                .env("AIMSIR_SERVER"),
+        )
+        .arg(
+            clap::arg!(loglevel: -l --loglevel <LOGLEVEL> "loglevel")
+                .value_parser([
+                    clap::builder::PossibleValue::new("error"),
+                    clap::builder::PossibleValue::new("warn"),
+                    clap::builder::PossibleValue::new("info"),
+                    clap::builder::PossibleValue::new("debug"),
+                ])
+                .env("AIMSIR_LOGLEVEL"),
         )
         .get_matches();
     match app
@@ -42,16 +50,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let node_id = app.get_one::<String>("id").unwrap().as_str();
-    let node_ip = app.get_one::<String>("ip").unwrap().as_str();
     let server = app.get_one::<String>("server").unwrap().as_str();
-    if let Ok(_parsed_ip) = node_ip.parse::<IpAddr>() {
-        let mut aimsir_client = aimsir::client_manager::ManagerController::new(
-            server.into(),
-            node_id.into(),
-            node_ip.into(),
-        )
-        .await?;
-        aimsir_client.worker().await?;
-    }
+    let mut aimsir_client =
+        aimsir::client_manager::ManagerController::new(server.into(), node_id.into(), "0".into())
+            .await?;
+    aimsir_client.worker().await?;
     Ok(())
 }
