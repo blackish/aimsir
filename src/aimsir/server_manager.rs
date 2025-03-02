@@ -100,7 +100,22 @@ impl aimsir_service_server::AimsirService for ServerController {
         let (tx, rx) = mpsc::channel(10);
         let mut receiver: broadcast::Receiver<aimsir::PeerUpdate>;
         let sender = self.update_tx.clone();
-        let local_peer = request.into_inner();
+        let mut local_peer: aimsir::Peer;
+        if let Some(remote_sock_address) = request.remote_addr() {
+            local_peer = request.into_inner().clone();
+            local_peer.ipaddress = String::from(
+                remote_sock_address
+                    .to_string()
+                    .split(":")
+                    .collect::<Vec<&str>>()[0],
+            );
+        } else {
+            local_peer = request.into_inner().clone();
+            log::warn!(
+                "Failed to get remote ip for peer {}. Trust reported ip instead.",
+                local_peer.id
+            );
+        }
         let probe_interval = self.probe_interval.clone();
         let aggregate_interval = self.aggregate_interval.clone();
         log::debug!(
@@ -242,17 +257,17 @@ impl aimsir_service_server::AimsirService for ServerController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use model::db::Db;
     use aimsir::{
         self, aimsir_service_client::AimsirServiceClient,
         aimsir_service_server::AimsirServiceServer,
     };
+    use dotenv;
+    use model::db::Db;
+    use std::env;
     use std::net::SocketAddr;
     use tokio::{self, sync::mpsc};
     use tokio_stream;
     use tonic;
-    use dotenv;
-    use std::env;
 
     #[tokio::test]
     async fn test_connect_nonexisting_peer() {
