@@ -10,7 +10,10 @@ use aimsir::{
 use axum::{
     routing::{delete, get, post},
     Router,
+    response::IntoResponse,
+    http::StatusCode,
 };
+use metrics_exporter_prometheus::PrometheusBuilder;
 use tower_http::cors::{Any, CorsLayer};
 use clap;
 use log;
@@ -20,6 +23,11 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
+
+async fn metrics_handler(handle: Arc<metrics_exporter_prometheus::PrometheusHandle>) -> impl IntoResponse {
+    let metrics = handle.render();
+    (StatusCode::OK, metrics)
+}
 
 #[tokio::main]
 // #[rocket::main]
@@ -107,6 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .allow_origin(Any) // Allows any origin
         .allow_methods(Any) // Allows any HTTP method
         .allow_headers(Any); // Allows any header
+    let handle = Arc::new(PrometheusBuilder::new().install_recorder().unwrap());
     let web_app = Router::new()
         .route("/stats", get(stats))
         .route("/stats/:statid", get(stats_id))
@@ -119,6 +128,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/peertags", get(peer_tags))
         .route("/peertags", post(add_peer_tag))
         .route("/peertags/:peer/:tag", delete(del_peer_tag))
+        .route("/metrics", get(move || {
+            let handle = Arc::clone(&handle);
+            metrics_handler(handle)
+        }))
         .with_state(BackendState {
             metrics: metrics.clone(),
             db: Arc::new(RwLock::new(model::mysql::MysqlDb::new(db).await?)),

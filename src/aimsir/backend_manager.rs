@@ -5,11 +5,7 @@ use axum::{
 use log;
 use serde::Serialize;
 use serde_json::{json, Value};
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{self, sync::RwLock, time as async_time};
 
 use crate::model;
@@ -25,6 +21,62 @@ pub struct BackendState {
     pub metrics: Arc<RwLock<HashMap<i32, BackendTag>>>,
     pub db: Arc<RwLock<dyn model::db::Db + Send + Sync>>,
     pub grpc_server: Arc<RwLock<String>>,
+}
+
+pub async fn get_metrics(
+    State(metrics): State<BackendState>,
+) -> Result<String, (StatusCode, String)> {
+    let tags = metrics
+        .db
+        .write()
+        .await
+        .get_tags()
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let mut tag_maps: HashMap<i32, String> = HashMap::new();
+    let _ = tags
+        .into_iter()
+        .map(|x| tag_maps.insert(x.id.unwrap(), x.name));
+    let mut result = String::new();
+    let local_metrics = metrics.metrics.read().await;
+    for (src, metric) in &*local_metrics {
+        for (dst, store_metric) in &metric.values {
+            let s = format!(
+                "pl_gauge{{src=\"{}\", src=\"{}\"}} {} {}\n",
+                tag_maps.get(src).unwrap(),
+                tag_maps.get(dst).unwrap(),
+                store_metric.pl,
+                store_metric.ts
+            );
+            result = result + &s;
+            let s = format!(
+                "jitter_min_gauge{{src=\"{}\", src=\"{}\"}} {} {}\n",
+                tag_maps.get(src).unwrap(),
+                tag_maps.get(dst).unwrap(),
+                store_metric.jitter_min,
+                store_metric.ts
+            );
+            result = result + &s;
+            let s = format!(
+                "jitter_max_gauge{{src=\"{}\", src=\"{}\"}} {} {}\n",
+                tag_maps.get(src).unwrap(),
+                tag_maps.get(dst).unwrap(),
+                store_metric.jitter_max,
+                store_metric.ts
+            );
+            result = result + &s;
+            let s = format!(
+                "jitter_stddev_gauge{{src=\"{}\", src=\"{}\"}} {} {}\n",
+                tag_maps.get(src).unwrap(),
+                tag_maps.get(dst).unwrap(),
+                store_metric.jitter_stddev,
+                store_metric.ts
+            );
+            result = result + &s;
+
+        }
+    }
+    Ok(result)
 }
 
 pub async fn stats(
@@ -208,15 +260,8 @@ async fn _create_result_hashmap(
     peers: Vec<model::Peer>,
     tags: Vec<model::Tag>,
     peer_tags: Vec<model::PeerTag>,
-) -> Result<
-    (
-        HashMap<i32, BackendTag>,
-        HashMap<String, Vec<model::Tag>>,
-    ),
-    sqlx::Error,
-> {
-    let mut peers_with_tags: HashMap<String, Vec<model::Tag>> =
-        HashMap::with_capacity(peers.len());
+) -> Result<(HashMap<i32, BackendTag>, HashMap<String, Vec<model::Tag>>), sqlx::Error> {
+    let mut peers_with_tags: HashMap<String, Vec<model::Tag>> = HashMap::with_capacity(peers.len());
     for peer in peers {
         peers_with_tags
             .entry(peer.peer_id.clone())
@@ -225,11 +270,16 @@ async fn _create_result_hashmap(
                     .iter()
                     .filter(|x| x.peer_id == &*peer.peer_id)
                     .map(|x| {
-                        tags
-                            .iter()
+                        tags.iter()
                             .find(|y| y.id.unwrap() == x.tag_id)
-                            .unwrap_or(&model::Tag{id: None, parent: None, name: "Not exists".into()}).clone()
-                    }).collect()
+                            .unwrap_or(&model::Tag {
+                                id: None,
+                                parent: None,
+                                name: "Not exists".into(),
+                            })
+                            .clone()
+                    })
+                    .collect()
             });
     }
     let mut levels: HashMap<i32, BackendTag> = HashMap::new();
@@ -247,7 +297,7 @@ async fn _create_result_hashmap(
                     .into_iter()
                     .map(|x| (x.id.unwrap(), model::StoreMetric::new_empty()))
                     .collect(),
-            }
+            },
         );
     }
     return Ok((levels, peers_with_tags));
@@ -258,10 +308,10 @@ fn _parse_output_metrics(
     peers_with_tags: HashMap<String, Vec<model::Tag>>,
     levels: &mut HashMap<i32, BackendTag>,
 ) {
-/*     let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64; */
+    /*     let ts = SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .unwrap()
+    .as_millis() as u64; */
     for (key, metric) in local_metrics {
         let dst = key;
         for (src, vals) in metric {
@@ -313,8 +363,7 @@ pub async fn render_results(
         let peers = db.get_peers().await?;
         let tags = db.get_tags().await?;
         let peer_tags = db.get_peer_tags().await?;
-        let (mut levels, peers_with_tags) =
-            _create_result_hashmap(peers, tags, peer_tags).await?;
+        let (mut levels, peers_with_tags) = _create_result_hashmap(peers, tags, peer_tags).await?;
 
         {
             let local_metrics = metrics.read().await;
@@ -366,7 +415,9 @@ mod tests {
             let (tx, rx) = mpsc::channel(1);
             tokio::spawn(async move {
                 loop {
-                    _ = tx.send(Ok(model::aimsir::MetricResponse { ok: true })).await;
+                    _ = tx
+                        .send(Ok(model::aimsir::MetricResponse { ok: true }))
+                        .await;
                 }
             });
             Ok(tonic::Response::new(ReceiverStream::new(rx)))
@@ -416,10 +467,7 @@ mod tests {
             values: HashMap::from([(2, storemetric)]),
         };
         let metrics = Arc::new(RwLock::new(HashMap::new()));
-        metrics
-            .write()
-            .await
-            .insert(0, backendtag);
+        metrics.write().await.insert(0, backendtag);
         let db = Arc::new(RwLock::new(
             model::mysql::MysqlDb::new(database_url.to_string())
                 .await
@@ -459,10 +507,7 @@ mod tests {
             values: HashMap::from([(2, storemetric)]),
         };
         let metrics = Arc::new(RwLock::new(HashMap::new()));
-        metrics
-            .write()
-            .await
-            .insert(0, backendtag);
+        metrics.write().await.insert(0, backendtag);
         let db = Arc::new(RwLock::new(
             model::mysql::MysqlDb::new(database_url.to_string())
                 .await
@@ -501,10 +546,7 @@ mod tests {
             values: HashMap::from([(2, storemetric)]),
         };
         let metrics = Arc::new(RwLock::new(HashMap::new()));
-        metrics
-            .write()
-            .await
-            .insert(0, backendtag);
+        metrics.write().await.insert(0, backendtag);
         let db = Arc::new(RwLock::new(
             model::mysql::MysqlDb::new(database_url.to_string())
                 .await
@@ -557,10 +599,7 @@ mod tests {
             values: HashMap::from([(2, storemetric)]),
         };
         let metrics = Arc::new(RwLock::new(HashMap::new()));
-        metrics
-            .write()
-            .await
-            .insert(0, backendtag);
+        metrics.write().await.insert(0, backendtag);
         let db = Arc::new(RwLock::new(
             model::mysql::MysqlDb::new(database_url.to_string())
                 .await
@@ -910,13 +949,7 @@ mod tests {
         _parse_output_metrics(&local_metrics, result_peer_with_tags, &mut levels);
         result_levels.entry(3).and_modify(|x| {
             x.values.entry(2).and_modify(|z| {
-                z.ts = levels
-                    .get(&3)
-                    .unwrap()
-                    .values
-                    .get(&2)
-                    .unwrap()
-                    .ts;
+                z.ts = levels.get(&3).unwrap().values.get(&2).unwrap().ts;
                 z.jitter_stddev = 1.0;
                 z.jitter_max = 1.0;
                 z.jitter_min = 1.0;
@@ -924,13 +957,7 @@ mod tests {
         });
         result_levels.entry(2).and_modify(|x| {
             x.values.entry(3).and_modify(|z| {
-                z.ts = levels
-                    .get(&2)
-                    .unwrap()
-                    .values
-                    .get(&3)
-                    .unwrap()
-                    .ts;
+                z.ts = levels.get(&2).unwrap().values.get(&3).unwrap().ts;
                 z.jitter_stddev = 2.0;
                 z.jitter_max = 2.0;
                 z.jitter_min = 1.0;
@@ -938,13 +965,7 @@ mod tests {
         });
         result_levels.entry(0).and_modify(|x| {
             x.values.entry(0).and_modify(|z| {
-                z.ts = levels
-                    .get(&0)
-                    .unwrap()
-                    .values
-                    .get(&0)
-                    .unwrap()
-                    .ts;
+                z.ts = levels.get(&0).unwrap().values.get(&0).unwrap().ts;
                 z.jitter_stddev = 1.5;
                 z.jitter_max = 2.0;
                 z.jitter_min = 1.0;
