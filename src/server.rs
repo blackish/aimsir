@@ -1,6 +1,6 @@
 use aimsir::backend_manager::{
     add_peer, add_peer_tag, add_tag, del_peer, del_peer_tag, del_tag,
-    peer_tags, peers, render_results, stats, stats_id, tags,
+    peer_tags, peers, render_results, stats, stats_id, tags, get_metrics
 };
 use aimsir::{
     self,
@@ -119,6 +119,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/peertags", get(peer_tags))
         .route("/peertags", post(add_peer_tag))
         .route("/peertags/:peer/:tag", delete(del_peer_tag))
+        .route("/metrics", get(get_metrics))
         .with_state(BackendState {
             metrics: metrics.clone(),
             db: Arc::new(RwLock::new(model::mysql::MysqlDb::new(db).await?)),
