@@ -820,7 +820,7 @@ mod tests {
         let _ = local_db.del_tag(0).await;
         let _ = local_db.del_tag(1).await;
         let _ = local_db.del_tag(2).await;
-        assert_eq!(body, String::from("pl_gauge{src=\"0\", src=\"2\"} 5 1\njitter_min_gauge{src=\"0\", src=\"2\"} 0 1\njitter_max_gauge{src=\"0\", src=\"2\"} 1 1\njitter_stddev_gauge{src=\"0\", src=\"2\"} 0.5 1\n"));
+        assert_eq!(body, String::from("pl_gauge{src=\"0\", dst=\"2\"} 5 1\njitter_min_gauge{src=\"0\", dst=\"2\"} 0 1\njitter_max_gauge{src=\"0\", dst=\"2\"} 1 1\njitter_stddev_gauge{src=\"0\", dst=\"2\"} 0.5 1\n"));
     }
 
     #[tokio::test]
