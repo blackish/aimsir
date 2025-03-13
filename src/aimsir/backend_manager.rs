@@ -47,7 +47,7 @@ pub async fn get_metrics(
                 || (store_metric.ts > 0)
             {
                 let s = format!(
-                    "pl_gauge{{src=\"{}\", src=\"{}\"}} {} {}\n",
+                    "pl_gauge{{src=\"{}\", dst=\"{}\"}} {} {}\n",
                     tag_maps.get(src).unwrap_or(&String::from("unknown")),
                     tag_maps.get(dst).unwrap_or(&String::from("unknown")),
                     store_metric.pl,
@@ -57,7 +57,7 @@ pub async fn get_metrics(
             }
             if store_metric.jitter_min > -1.0 {
                 let s = format!(
-                    "jitter_min_gauge{{src=\"{}\", src=\"{}\"}} {} {}\n",
+                    "jitter_min_gauge{{src=\"{}\", dst=\"{}\"}} {} {}\n",
                     tag_maps.get(src).unwrap(),
                     tag_maps.get(dst).unwrap(),
                     store_metric.jitter_min,
@@ -67,7 +67,7 @@ pub async fn get_metrics(
             }
             if store_metric.jitter_max > -1.0 {
                 let s = format!(
-                    "jitter_max_gauge{{src=\"{}\", src=\"{}\"}} {} {}\n",
+                    "jitter_max_gauge{{src=\"{}\", dst=\"{}\"}} {} {}\n",
                     tag_maps.get(src).unwrap(),
                     tag_maps.get(dst).unwrap(),
                     store_metric.jitter_max,
@@ -77,7 +77,7 @@ pub async fn get_metrics(
             }
             if store_metric.jitter_stddev > -1.0 {
                 let s = format!(
-                    "jitter_stddev_gauge{{src=\"{}\", src=\"{}\"}} {} {}\n",
+                    "jitter_stddev_gauge{{src=\"{}\", dst=\"{}\"}} {} {}\n",
                     tag_maps.get(src).unwrap(),
                     tag_maps.get(dst).unwrap(),
                     store_metric.jitter_stddev,
@@ -820,7 +820,7 @@ mod tests {
         let _ = local_db.del_tag(0).await;
         let _ = local_db.del_tag(1).await;
         let _ = local_db.del_tag(2).await;
-        assert_eq!(body, String::from("pl_gauge{src=\"0\", src=\"2\"} 5 1\njitter_min_gauge{src=\"0\", src=\"2\"} 0 1\njitter_max_gauge{src=\"0\", src=\"2\"} 1 1\njitter_stddev_gauge{src=\"0\", src=\"2\"} 0.5 1\n"));
+        assert_eq!(body, String::from("pl_gauge{src=\"0\", dst=\"2\"} 5 1\njitter_min_gauge{src=\"0\", dst=\"2\"} 0 1\njitter_max_gauge{src=\"0\", dst=\"2\"} 1 1\njitter_stddev_gauge{src=\"0\", dst=\"2\"} 0.5 1\n"));
     }
 
     #[tokio::test]
