@@ -41,7 +41,11 @@ pub async fn get_metrics(
     let local_metrics = metrics.metrics.read().await;
     for (src, metric) in &*local_metrics {
         for (dst, store_metric) in &metric.values {
-            if (store_metric.jitter_max > -1.0 && store_metric.jitter_min > -1.0 && store_metric.jitter_stddev > -1.0) || (store_metric.ts > 0) {
+            if (store_metric.jitter_max > -1.0
+                && store_metric.jitter_min > -1.0
+                && store_metric.jitter_stddev > -1.0)
+                || (store_metric.ts > 0)
+            {
                 let s = format!(
                     "pl_gauge{{src=\"{}\", src=\"{}\"}} {} {}\n",
                     tag_maps.get(src).unwrap_or(&String::from("unknown")),
@@ -765,13 +769,31 @@ mod tests {
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let body: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(body, json!([]));
-        
+
         // get metrics
         {
             let mut local_db = db.write().await;
-            local_db.add_tag(model::Tag{id: Some(0), parent: None, name: "0".into()}).await;
-            local_db.add_tag(model::Tag{id: Some(1), parent: None, name: "1".into()}).await;
-            local_db.add_tag(model::Tag{id: Some(2), parent: None, name: "2".into()}).await;
+            let _ = local_db
+                .add_tag(model::Tag {
+                    id: Some(0),
+                    parent: None,
+                    name: "0".into(),
+                })
+                .await;
+            let _ = local_db
+                .add_tag(model::Tag {
+                    id: Some(1),
+                    parent: None,
+                    name: "1".into(),
+                })
+                .await;
+            let _ = local_db
+                .add_tag(model::Tag {
+                    id: Some(2),
+                    parent: None,
+                    name: "2".into(),
+                })
+                .await;
             println!("{:?}", metrics);
         };
         let request = Request::builder()
@@ -781,14 +803,24 @@ mod tests {
             .unwrap();
         let response = app.clone().oneshot(request).await.expect("ERR");
         assert_eq!(response.status(), StatusCode::OK);
-        let body = String::from_utf8(response.into_body().collect().await.unwrap().to_bytes().iter().as_slice().to_vec()).unwrap();
+        let body = String::from_utf8(
+            response
+                .into_body()
+                .collect()
+                .await
+                .unwrap()
+                .to_bytes()
+                .iter()
+                .as_slice()
+                .to_vec(),
+        )
+        .unwrap();
         println!("{}", body);
         let mut local_db = db.write().await;
-        local_db.del_tag(0).await;
-        local_db.del_tag(1).await;
-        local_db.del_tag(2).await;
+        let _ = local_db.del_tag(0).await;
+        let _ = local_db.del_tag(1).await;
+        let _ = local_db.del_tag(2).await;
         assert_eq!(body, String::from("pl_gauge{src=\"0\", src=\"2\"} 5 1\njitter_min_gauge{src=\"0\", src=\"2\"} 0 1\njitter_max_gauge{src=\"0\", src=\"2\"} 1 1\njitter_stddev_gauge{src=\"0\", src=\"2\"} 0.5 1\n"));
-
     }
 
     #[tokio::test]
