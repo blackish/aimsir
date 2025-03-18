@@ -794,7 +794,6 @@ mod tests {
                     name: "2".into(),
                 })
                 .await;
-            println!("{:?}", metrics);
         };
         let request = Request::builder()
             .method("GET")
