@@ -32,12 +32,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .arg(
             clap::arg!(interval: -i --interval <interval> "probe interval")
                 .required(true)
-                .value_parser(clap::value_parser!(u32)),
+                .value_parser(clap::value_parser!(u32))
+                .env("AIMSIR_INTERVAL"),
         )
         .arg(
             clap::arg!(aggregate: -a --aggregate <aggregate> "aggregate interval")
                 .required(true)
-                .value_parser(clap::value_parser!(u32)),
+                .value_parser(clap::value_parser!(u32))
+                .env("AIMSIR_AGGREGATE"),
         )
         .arg(
             clap::arg!(loglevel: -l --loglevel <LOGLEVEL> "loglevel").value_parser([
@@ -45,7 +47,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 clap::builder::PossibleValue::new("warn"),
                 clap::builder::PossibleValue::new("info"),
                 clap::builder::PossibleValue::new("debug"),
-            ]),
+            ])
+            .env("AIMSIR_LOGLEVEL"),
         )
         .get_matches();
     match app
