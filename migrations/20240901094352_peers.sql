@@ -1,9 +1,9 @@
-CREATE TABLE peers (
+CREATE TABLE IF NOT EXISTS peers (
   peer_id VARCHAR(255) NOT NULL PRIMARY KEY,
   name VARCHAR(255) NOT NULL
 );
 
-CREATE TABLE tags (
+CREATE TABLE IF NOT EXISTS tags (
   id INTEGER NOT NULL PRIMARY KEY,
   parent INTEGER,
   name VARCHAR(255) NOT NULL,
@@ -11,7 +11,7 @@ CREATE TABLE tags (
   UNIQUE(parent, name)
 );
 
-CREATE TABLE peer_tags (
+CREATE TABLE IF NOT EXISTS peer_tags (
   peer_id VARCHAR(255) NOT NULL,
   tag_id INTEGER NOT NULL,
   FOREIGN KEY (peer_id) REFERENCES peers(peer_id),
