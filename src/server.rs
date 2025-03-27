@@ -111,17 +111,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .allow_methods(Any) // Allows any HTTP method
         .allow_headers(Any); // Allows any header
     let web_app = Router::new()
-        .route("/stats", get(stats))
-        .route("/stats/:statid", get(stats_id))
-        .route("/peers", get(peers))
-        .route("/peers", post(add_peer))
-        .route("/peers/:peer", delete(del_peer))
-        .route("/tags", get(tags))
-        .route("/tags", post(add_tag))
-        .route("/tags/:tag", delete(del_tag))
-        .route("/peertags", get(peer_tags))
-        .route("/peertags", post(add_peer_tag))
-        .route("/peertags/:peer/:tag", delete(del_peer_tag))
+        .route("/aimsir/api/v1/stats", get(stats))
+        .route("/aimsir/api/v1/stats/:statid", get(stats_id))
+        .route("/aimsir/api/v1/peers", get(peers))
+        .route("/aimsir/api/v1/peers", post(add_peer))
+        .route("/aimsir/api/v1/peers/:peer", delete(del_peer))
+        .route("/aimsir/api/v1/tags", get(tags))
+        .route("/aimsir/api/v1/tags", post(add_tag))
+        .route("/aimsir/api/v1/tags/:tag", delete(del_tag))
+        .route("/aimsir/api/v1/peertags", get(peer_tags))
+        .route("/aimsir/api/v1/peertags", post(add_peer_tag))
+        .route("/aimsir/api/v1/peertags/:peer/:tag", delete(del_peer_tag))
         .route("/metrics", get(get_metrics))
         .with_state(BackendState {
             metrics: metrics.clone(),
