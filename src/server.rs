@@ -26,8 +26,8 @@ use tokio::sync::RwLock;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = clap::Command::new("aimsir-server")
         .version("0.0.1")
-        .arg(clap::arg!(ip: -p --ip <ip> "node local ip").required(true))
-        .arg(clap::arg!(webip: -w --webip <webip> "node web ui local ip").required(true))
+        .arg(clap::arg!(ip: -p --ip <ip> "node local ip").required(true).env("AIMSIR_IP"))
+        .arg(clap::arg!(webip: -w --webip <webip> "node web ui local ip").required(true).env("AIMSIR_WEBIP"))
         .arg(clap::arg!(db: -b --db <db> "database name").required(true))
         .arg(
             clap::arg!(interval: -i --interval <interval> "probe interval")
