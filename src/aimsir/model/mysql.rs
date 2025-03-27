@@ -1,6 +1,8 @@
+use std::str::FromStr;
+
 use crate::model;
 
-use sqlx;
+use sqlx::{self, mysql::MySqlConnectOptions};
 use tonic::async_trait;
 
 pub struct MysqlDb {
@@ -9,7 +11,12 @@ pub struct MysqlDb {
 
 impl MysqlDb {
     pub async fn new(database_url: String) -> Result<Self, Box<dyn std::error::Error>> {
-        let conn = sqlx::MySqlPool::connect(&database_url).await?;
+        // let conn = sqlx::MySqlPool::connect(&database_url).await?;
+        // conn.set_connect_options(MySqlConnectOptions::new().pipes_as_concat(false));
+        let conn = sqlx::MySqlPool::connect_with(
+            MySqlConnectOptions::from_str(database_url.as_str())?.pipes_as_concat(false),
+        )
+        .await?;
         Ok(Self { conn })
     }
 }
@@ -47,9 +54,13 @@ impl model::db::Db for MysqlDb {
         let tag = sqlx::query_as!(model::Tag, "SELECT * FROM tags WHERE id = ?", tag_id,)
             .fetch_one(&self.conn)
             .await?;
-        let _results = sqlx::query!("UPDATE tags SET parent = ? WHERE parent = ?", tag.parent, tag_id)
-            .execute(&self.conn)
-            .await?;
+        let _results = sqlx::query!(
+            "UPDATE tags SET parent = ? WHERE parent = ?",
+            tag.parent,
+            tag_id
+        )
+        .execute(&self.conn)
+        .await?;
         let _results = sqlx::query!("DELETE FROM tags WHERE id = ?", tag_id,)
             .execute(&self.conn)
             .await?;
