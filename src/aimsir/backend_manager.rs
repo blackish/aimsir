@@ -371,18 +371,30 @@ pub async fn render_results(
     loop {
         async_time::sleep(sleep_duration).await;
         log::debug!("Updating output metrics");
-        let peers = db.get_peers().await?;
-        let tags = db.get_tags().await?;
-        let peer_tags = db.get_peer_tags().await?;
-        let (mut levels, peers_with_tags) = _create_result_hashmap(peers, tags, peer_tags).await?;
+        if let Ok(peers) = db.get_peers().await {
+            if let Ok(tags) = db.get_tags().await {
+                if let Ok(peer_tags) = db.get_peer_tags().await {
+                    if let Ok((mut levels, peers_with_tags)) = _create_result_hashmap(peers, tags, peer_tags).await {
+                        {
 
-        {
-            let local_metrics = metrics.read().await;
-            _parse_output_metrics(&*local_metrics, peers_with_tags, &mut levels);
-        }
-        {
-            let mut new_output_metrics = output_metrics.write().await;
-            *new_output_metrics = levels;
+                            let local_metrics = metrics.read().await;
+                            _parse_output_metrics(&*local_metrics, peers_with_tags, &mut levels);
+                        }
+                        {
+                            let mut new_output_metrics = output_metrics.write().await;
+                            *new_output_metrics = levels;
+                        }
+                    } else {
+                        log::warn!("Failed to create result hashmap");
+                    }
+                } else {
+                    log::warn!("Failed to get peer tags");
+                }
+            } else {
+                log::warn!("Failed to get tags");
+            }
+        } else {
+            log::warn!("Failed to get peers");
         }
     }
 }
