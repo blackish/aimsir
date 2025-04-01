@@ -14,7 +14,9 @@ impl MysqlDb {
         // let conn = sqlx::MySqlPool::connect(&database_url).await?;
         // conn.set_connect_options(MySqlConnectOptions::new().pipes_as_concat(false));
         let conn = sqlx::MySqlPool::connect_with(
-            MySqlConnectOptions::from_str(database_url.as_str())?.pipes_as_concat(false),
+            MySqlConnectOptions::from_str(database_url.as_str())?
+                .pipes_as_concat(false)
+                .no_engine_substitution(false),
         )
         .await?;
         Ok(Self { conn })
