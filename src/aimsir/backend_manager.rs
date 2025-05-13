@@ -418,7 +418,7 @@ pub async fn render_results(
                         {
                             let maintenance_peers: Vec<String> = peers
                                 .into_iter()
-                                .filter(|x| x.maintenance.unwrap_or(1) == 0)
+                                .filter(|x| x.maintenance.unwrap_or(0) != 0)
                                 .map(|x| x.peer_id)
                                 .collect();
                             let local_metrics = metrics.read().await;
