@@ -1,6 +1,6 @@
 use aimsir::backend_manager::{
-    add_peer, add_peer_tag, add_tag, del_peer, del_peer_tag, del_tag,
-    peer_tags, peers, render_results, stats, stats_id, tags, get_metrics
+    add_peer, add_peer_tag, add_tag, del_peer, del_peer_tag, del_tag, disable_peer, enable_peer,
+    get_metrics, peer_tags, peers, render_results, stats, stats_id, tags,
 };
 use aimsir::{
     self,
@@ -11,7 +11,6 @@ use axum::{
     routing::{delete, get, post},
     Router,
 };
-use tower_http::cors::{Any, CorsLayer};
 use clap;
 use log;
 use simple_logger;
@@ -20,15 +19,28 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
+use tower_http::cors::{Any, CorsLayer};
 
 #[tokio::main]
 // #[rocket::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = clap::Command::new("aimsir-server")
         .version("0.0.1")
-        .arg(clap::arg!(ip: -p --ip <ip> "node local ip").required(true).env("AIMSIR_IP"))
-        .arg(clap::arg!(webip: -w --webip <webip> "node web ui local ip").required(true).env("AIMSIR_WEBIP"))
-        .arg(clap::arg!(db: -b --db <db> "database name").required(true).env("AIMSIR_DATABASE_URL"))
+        .arg(
+            clap::arg!(ip: -p --ip <ip> "node local ip")
+                .required(true)
+                .env("AIMSIR_IP"),
+        )
+        .arg(
+            clap::arg!(webip: -w --webip <webip> "node web ui local ip")
+                .required(true)
+                .env("AIMSIR_WEBIP"),
+        )
+        .arg(
+            clap::arg!(db: -b --db <db> "database name")
+                .required(true)
+                .env("AIMSIR_DATABASE_URL"),
+        )
         .arg(
             clap::arg!(interval: -i --interval <interval> "probe interval")
                 .required(true)
@@ -42,13 +54,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .env("AIMSIR_AGGREGATE"),
         )
         .arg(
-            clap::arg!(loglevel: -l --loglevel <LOGLEVEL> "loglevel").value_parser([
-                clap::builder::PossibleValue::new("error"),
-                clap::builder::PossibleValue::new("warn"),
-                clap::builder::PossibleValue::new("info"),
-                clap::builder::PossibleValue::new("debug"),
-            ])
-            .env("AIMSIR_LOGLEVEL"),
+            clap::arg!(loglevel: -l --loglevel <LOGLEVEL> "loglevel")
+                .value_parser([
+                    clap::builder::PossibleValue::new("error"),
+                    clap::builder::PossibleValue::new("warn"),
+                    clap::builder::PossibleValue::new("info"),
+                    clap::builder::PossibleValue::new("debug"),
+                ])
+                .env("AIMSIR_LOGLEVEL"),
         )
         .get_matches();
     match app
@@ -114,6 +127,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/aimsir/api/v1/stats", get(stats))
         .route("/aimsir/api/v1/stats/:statid", get(stats_id))
         .route("/aimsir/api/v1/peers", get(peers))
+        .route("/aimsir/api/v1/disable-peer/:peer", get(disable_peer))
+        .route("/aimsir/api/v1/enable-peer/:peer", get(enable_peer))
         .route("/aimsir/api/v1/peers", post(add_peer))
         .route("/aimsir/api/v1/peers/:peer", delete(del_peer))
         .route("/aimsir/api/v1/tags", get(tags))

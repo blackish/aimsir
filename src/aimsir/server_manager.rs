@@ -315,6 +315,7 @@ mod tests {
             .add_peer(model::Peer {
                 peer_id: "0".into(),
                 name: "noname".into(),
+                maintenance: None,
             })
             .await
             .unwrap();
@@ -436,6 +437,7 @@ mod tests {
             .add_peer(model::Peer {
                 peer_id: "0".into(),
                 name: "noname".into(),
+                maintenance: None,
             })
             .await
             .unwrap();

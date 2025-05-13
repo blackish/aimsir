@@ -154,6 +154,7 @@ impl StoreMetric {
 pub struct Peer {
     pub peer_id: String,
     pub name: String,
+    pub maintenance: Option<i8>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

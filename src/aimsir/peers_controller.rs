@@ -163,7 +163,6 @@ impl PeerController {
                                                     stat_entry.pl += pl;
                                                 }
                                                 stat_entry.jitters.push(jitter.abs());
-                                                // log::debug!("Got probe from: {}. jitter: {}, pl: {}", peer_msg.id, jitter, stat_entry.pl);
                                                 log::debug!("Got probe from: {}. jitter: {}, pl: {}, latency: {}, local ts: {}, remote ts: {}", peer_msg.id, jitter, stat_entry.pl, latency, current_ts, peer_msg.ts);
                                             }).or_insert_with(||
                                                 {
@@ -267,7 +266,10 @@ impl PeerController {
         ts: u64,
     ) -> Vec<model::Measurement> {
         let mut result = Vec::new();
-        let last_aggregate_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        let last_aggregate_ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
         for peer in self.peers.values() {
             let last_stat_ts: u64;
             if ts > peer.last_seen {

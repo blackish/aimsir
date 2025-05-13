@@ -11,8 +11,6 @@ pub struct MysqlDb {
 
 impl MysqlDb {
     pub async fn new(database_url: String) -> Result<Self, Box<dyn std::error::Error>> {
-        // let conn = sqlx::MySqlPool::connect(&database_url).await?;
-        // conn.set_connect_options(MySqlConnectOptions::new().pipes_as_concat(false));
         let conn = sqlx::MySqlPool::connect_with(
             MySqlConnectOptions::from_str(database_url.as_str())?
                 .pipes_as_concat(false)
@@ -118,9 +116,14 @@ impl model::db::Db for MysqlDb {
     }
     async fn add_peer(&mut self, peer: model::Peer) -> Result<(), sqlx::Error> {
         let mut conn = self.conn.begin().await?;
-        let _results = sqlx::query!("INSERT INTO peers VALUES (?, ?)", peer.peer_id, peer.name)
-            .execute(&mut *conn)
-            .await?;
+        let _results = sqlx::query!(
+            "INSERT INTO peers VALUES (?, ?, ?)",
+            peer.peer_id,
+            peer.name,
+            peer.maintenance
+        )
+        .execute(&mut *conn)
+        .await?;
         conn.commit().await?;
         Ok(())
     }
@@ -129,6 +132,28 @@ impl model::db::Db for MysqlDb {
         let _results = sqlx::query!("DELETE FROM peers WHERE peer_id = ?", peer_id,)
             .execute(&mut *conn)
             .await?;
+        conn.commit().await?;
+        Ok(())
+    }
+    async fn disable_peer(&mut self, peer_id: String) -> Result<(), sqlx::Error> {
+        let mut conn = self.conn.begin().await?;
+        let _results = sqlx::query!(
+            "UPDATE peers SET maintenance = true WHERE peer_id = ?",
+            peer_id,
+        )
+        .execute(&mut *conn)
+        .await?;
+        conn.commit().await?;
+        Ok(())
+    }
+    async fn enable_peer(&mut self, peer_id: String) -> Result<(), sqlx::Error> {
+        let mut conn = self.conn.begin().await?;
+        let _results = sqlx::query!(
+            "UPDATE peers SET maintenance = false WHERE peer_id = ?",
+            peer_id,
+        )
+        .execute(&mut *conn)
+        .await?;
         conn.commit().await?;
         Ok(())
     }

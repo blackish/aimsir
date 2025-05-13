@@ -5,6 +5,7 @@ use axum::{
 use log;
 use serde::Serialize;
 use serde_json::{json, Value};
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{self, sync::RwLock, time as async_time};
 
@@ -215,6 +216,32 @@ pub async fn del_peer(
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
 }
 
+pub async fn disable_peer(
+    Path(peer): Path<String>,
+    State(metrics): State<BackendState>,
+) -> Result<(), (StatusCode, String)> {
+    metrics
+        .db
+        .write()
+        .await
+        .disable_peer(peer)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
+}
+
+pub async fn enable_peer(
+    Path(peer): Path<String>,
+    State(metrics): State<BackendState>,
+) -> Result<(), (StatusCode, String)> {
+    metrics
+        .db
+        .write()
+        .await
+        .enable_peer(peer)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
+}
+
 pub async fn add_tag(
     State(metrics): State<BackendState>,
     Json(tag): Json<model::Tag>,
@@ -268,7 +295,7 @@ pub async fn del_peer_tag(
 }
 
 async fn _create_result_hashmap(
-    peers: Vec<model::Peer>,
+    peers: &Vec<model::Peer>,
     tags: Vec<model::Tag>,
     peer_tags: Vec<model::PeerTag>,
 ) -> Result<(HashMap<i32, BackendTag>, HashMap<String, Vec<model::Tag>>), sqlx::Error> {
@@ -318,14 +345,22 @@ fn _parse_output_metrics(
     local_metrics: &HashMap<String, HashMap<String, model::StoreMetric>>,
     peers_with_tags: HashMap<String, Vec<model::Tag>>,
     levels: &mut HashMap<i32, BackendTag>,
+    reconcile_time: u16,
+    maintenance_peers: Vec<String>,
 ) {
-    /*     let ts = SystemTime::now()
-    .duration_since(UNIX_EPOCH)
-    .unwrap()
-    .as_millis() as u64; */
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
     for (key, metric) in local_metrics {
         let dst = key;
+        if maintenance_peers.contains(dst) {
+            continue;
+        }
         for (src, vals) in metric {
+            if maintenance_peers.contains(src) {
+                continue;
+            }
             let src_level = peers_with_tags[src].clone();
             let dst_level = peers_with_tags[dst].clone();
             for level in src_level {
@@ -334,22 +369,25 @@ fn _parse_output_metrics(
                         if let Some(dst_id) = dst_tag.id {
                             levels.entry(src_id).and_modify(|x| {
                                 x.values.entry(dst_id).and_modify(|z| {
-                                    if z.ts < vals.ts {
-                                        z.ts = vals.ts.clone();
-                                    }
-                                    z.pl += vals.pl;
-                                    if z.jitter_min == -1.0 || z.jitter_min > vals.jitter_min {
-                                        z.jitter_min = vals.jitter_min;
-                                    }
-                                    if z.jitter_max == -1.0 || z.jitter_max < vals.jitter_max {
-                                        z.jitter_max = vals.jitter_max;
-                                    }
-                                    if z.jitter_stddev == -1.0 {
-                                        z.jitter_stddev = 0.0;
-                                    }
-                                    z.jitter_stddev += vals.jitter_stddev;
-                                    if z.jitter_stddev != vals.jitter_stddev {
-                                        z.jitter_stddev /= 2.0;
+                                    // we skip stale metrics
+                                    if ts - z.ts <= ((reconcile_time as u64) * 1500) || z.ts == 0 {
+                                        if z.ts < vals.ts {
+                                            z.ts = vals.ts.clone();
+                                        }
+                                        z.pl += vals.pl;
+                                        if z.jitter_min == -1.0 || z.jitter_min > vals.jitter_min {
+                                            z.jitter_min = vals.jitter_min;
+                                        }
+                                        if z.jitter_max == -1.0 || z.jitter_max < vals.jitter_max {
+                                            z.jitter_max = vals.jitter_max;
+                                        }
+                                        if z.jitter_stddev == -1.0 {
+                                            z.jitter_stddev = 0.0;
+                                        }
+                                        z.jitter_stddev += vals.jitter_stddev;
+                                        if z.jitter_stddev != vals.jitter_stddev {
+                                            z.jitter_stddev /= 2.0;
+                                        };
                                     };
                                 });
                             });
@@ -374,11 +412,23 @@ pub async fn render_results(
         if let Ok(peers) = db.get_peers().await {
             if let Ok(tags) = db.get_tags().await {
                 if let Ok(peer_tags) = db.get_peer_tags().await {
-                    if let Ok((mut levels, peers_with_tags)) = _create_result_hashmap(peers, tags, peer_tags).await {
+                    if let Ok((mut levels, peers_with_tags)) =
+                        _create_result_hashmap(&peers, tags, peer_tags).await
+                    {
                         {
-
+                            let maintenance_peers: Vec<String> = peers
+                                .into_iter()
+                                .filter(|x| x.maintenance.unwrap_or(1) != 0)
+                                .map(|x| x.peer_id)
+                                .collect();
                             let local_metrics = metrics.read().await;
-                            _parse_output_metrics(&*local_metrics, peers_with_tags, &mut levels);
+                            _parse_output_metrics(
+                                &*local_metrics,
+                                peers_with_tags,
+                                &mut levels,
+                                reconcile_time,
+                                maintenance_peers,
+                            );
                         }
                         {
                             let mut new_output_metrics = output_metrics.write().await;
@@ -639,6 +689,8 @@ mod tests {
             .route("/peers", get(peers))
             .route("/peers", post(add_peer))
             .route("/peers/:peer", delete(del_peer))
+            .route("/disable-peer/:peer", get(disable_peer))
+            .route("/enable-peer/:peer", get(enable_peer))
             .route("/tags", get(tags))
             .route("/tags", post(add_tag))
             .route("/tags/:tag", delete(del_tag))
@@ -651,6 +703,7 @@ mod tests {
         let new_peer = model::Peer {
             peer_id: "0".into(),
             name: "name".into(),
+            maintenance: None,
         };
         let request = Request::builder()
             .method("POST")
@@ -671,6 +724,54 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body, json!(vec![new_peer]));
+
+        // Disable peer
+        let request = Request::builder()
+            .method("GET")
+            .uri("/disable-peer/0")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(request).await.expect("ERR");
+        assert_eq!(response.status(), StatusCode::OK);
+        let request = Request::builder()
+            .method("GET")
+            .uri("/peers")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(request).await.expect("ERR");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        let new_peer = model::Peer {
+            peer_id: "0".into(),
+            name: "name".into(),
+            maintenance: Some(1),
+        };
+        assert_eq!(body, json!(vec![new_peer]));
+
+        // Enable peer
+        let request = Request::builder()
+            .method("GET")
+            .uri("/enable-peer/0")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(request).await.expect("ERR");
+        assert_eq!(response.status(), StatusCode::OK);
+        let request = Request::builder()
+            .method("GET")
+            .uri("/peers")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(request).await.expect("ERR");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        let new_peer = model::Peer {
+            peer_id: "0".into(),
+            name: "name".into(),
+            maintenance: Some(0),
+        };
         assert_eq!(body, json!(vec![new_peer]));
 
         // Creating new tag
@@ -861,10 +962,12 @@ mod tests {
             model::Peer {
                 peer_id: "0".into(),
                 name: "peer0".into(),
+                maintenance: None,
             },
             model::Peer {
                 peer_id: "1".into(),
                 name: "peer1".into(),
+                maintenance: None,
             },
         ];
         let peer_tags: Vec<model::PeerTag> = vec![
@@ -885,7 +988,7 @@ mod tests {
                 tag_id: 3,
             },
         ];
-        let (levels, peers_with_tags) = _create_result_hashmap(peers, tags.clone(), peer_tags)
+        let (levels, peers_with_tags) = _create_result_hashmap(&peers, tags.clone(), peer_tags)
             .await
             .expect("ERR");
         let mut result_levels: HashMap<i32, BackendTag> = HashMap::new();
@@ -1008,7 +1111,7 @@ mod tests {
         );
         local_metrics.entry("0".into()).and_modify(|x| {
             x.entry("1".into()).and_modify(|y| {
-                y.ts = 1;
+                y.ts = 0;
                 y.jitter_min = 1.0;
                 y.jitter_max = 1.0;
                 y.jitter_stddev = 1.0;
@@ -1016,13 +1119,19 @@ mod tests {
         });
         local_metrics.entry("1".into()).and_modify(|x| {
             x.entry("0".into()).and_modify(|y| {
-                y.ts = 1;
+                y.ts = 0;
                 y.jitter_min = 1.0;
                 y.jitter_max = 2.0;
                 y.jitter_stddev = 2.0;
             });
         });
-        _parse_output_metrics(&local_metrics, result_peer_with_tags, &mut levels);
+        _parse_output_metrics(
+            &local_metrics,
+            result_peer_with_tags,
+            &mut levels,
+            60,
+            Vec::new(),
+        );
         result_levels.entry(3).and_modify(|x| {
             x.values.entry(2).and_modify(|z| {
                 z.ts = levels.get(&3).unwrap().values.get(&2).unwrap().ts;
@@ -1045,6 +1154,130 @@ mod tests {
                 z.jitter_stddev = 1.5;
                 z.jitter_max = 2.0;
                 z.jitter_min = 1.0;
+            });
+        });
+        assert_eq!(levels, result_levels);
+    }
+    #[tokio::test]
+    async fn test_parse_output_metrics_maintenance() {
+        let tags: Vec<model::Tag> = vec![
+            model::Tag {
+                id: Some(0),
+                parent: None,
+                name: "root_tag1".into(),
+            },
+            model::Tag {
+                id: Some(1),
+                parent: None,
+                name: "root_tag2".into(),
+            },
+            model::Tag {
+                id: Some(2),
+                parent: Some(0),
+                name: "child_tag1".into(),
+            },
+            model::Tag {
+                id: Some(3),
+                parent: Some(0),
+                name: "child_tag2".into(),
+            },
+        ];
+        let mut result_levels: HashMap<i32, BackendTag> = HashMap::new();
+        result_levels.insert(
+            0,
+            BackendTag {
+                values: HashMap::from([
+                    (1, model::StoreMetric::new_empty()),
+                    (0, model::StoreMetric::new_empty()),
+                ]),
+            },
+        );
+        result_levels.insert(
+            1,
+            BackendTag {
+                values: HashMap::from([
+                    (0, model::StoreMetric::new_empty()),
+                    (1, model::StoreMetric::new_empty()),
+                ]),
+            },
+        );
+        result_levels.insert(
+            2,
+            BackendTag {
+                values: HashMap::from([
+                    (3, model::StoreMetric::new_empty()),
+                    (2, model::StoreMetric::new_empty()),
+                ]),
+            },
+        );
+        result_levels.insert(
+            3,
+            BackendTag {
+                values: HashMap::from([
+                    (2, model::StoreMetric::new_empty()),
+                    (3, model::StoreMetric::new_empty()),
+                ]),
+            },
+        );
+        let mut result_peer_with_tags: HashMap<String, Vec<model::Tag>> = HashMap::new();
+        result_peer_with_tags.insert("0".into(), vec![tags[0].clone(), tags[2].clone()]);
+        result_peer_with_tags.insert("1".into(), vec![tags[0].clone(), tags[3].clone()]);
+        let mut local_metrics: HashMap<String, HashMap<String, model::StoreMetric>> =
+            HashMap::new();
+        let mut levels = result_levels.clone();
+        local_metrics.insert(
+            "0".into(),
+            HashMap::from([("1".into(), model::StoreMetric::new_empty())]),
+        );
+        local_metrics.insert(
+            "1".into(),
+            HashMap::from([("0".into(), model::StoreMetric::new_empty())]),
+        );
+        local_metrics.entry("0".into()).and_modify(|x| {
+            x.entry("1".into()).and_modify(|y| {
+                y.ts = 0;
+                y.jitter_min = 1.0;
+                y.jitter_max = 1.0;
+                y.jitter_stddev = 1.0;
+            });
+        });
+        local_metrics.entry("1".into()).and_modify(|x| {
+            x.entry("0".into()).and_modify(|y| {
+                y.ts = 0;
+                y.jitter_min = 1.0;
+                y.jitter_max = 2.0;
+                y.jitter_stddev = 2.0;
+            });
+        });
+        _parse_output_metrics(
+            &local_metrics,
+            result_peer_with_tags,
+            &mut levels,
+            60,
+            vec![String::from("0")],
+        );
+        result_levels.entry(3).and_modify(|x| {
+            x.values.entry(2).and_modify(|z| {
+                z.ts = levels.get(&3).unwrap().values.get(&2).unwrap().ts;
+                z.jitter_stddev = -1.0;
+                z.jitter_max = -1.0;
+                z.jitter_min = -1.0;
+            });
+        });
+        result_levels.entry(2).and_modify(|x| {
+            x.values.entry(3).and_modify(|z| {
+                z.ts = levels.get(&2).unwrap().values.get(&3).unwrap().ts;
+                z.jitter_stddev = -1.0;
+                z.jitter_max = -1.0;
+                z.jitter_min = -1.0;
+            });
+        });
+        result_levels.entry(0).and_modify(|x| {
+            x.values.entry(0).and_modify(|z| {
+                z.ts = levels.get(&0).unwrap().values.get(&0).unwrap().ts;
+                z.jitter_stddev = -1.0;
+                z.jitter_max = -1.0;
+                z.jitter_min = -1.0;
             });
         });
         assert_eq!(levels, result_levels);
