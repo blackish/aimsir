@@ -365,7 +365,8 @@ fn _parse_output_metrics(
             let dst_level = peers_with_tags[dst].clone();
             for level in src_level {
                 if let Some(src_id) = level.id {
-                    if let Some(dst_tag) = dst_level.iter().find(|x| level.parent == x.parent) {
+                    // if let Some(dst_tag) = dst_level.iter().find(|x| level.parent == x.parent && level.id != x.id) {
+                    for dst_tag in dst_level.iter().filter(|x| level.parent == x.parent) {
                         if let Some(dst_id) = dst_tag.id {
                             levels.entry(src_id).and_modify(|x| {
                                 x.values.entry(dst_id).and_modify(|z| {
