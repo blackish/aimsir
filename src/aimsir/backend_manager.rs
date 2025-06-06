@@ -195,7 +195,8 @@ pub async fn del_peer(
                     format!("Failed to connect to gRPC server: {}", err.to_string()),
                 )
             })?;
-    client
+    // peer might not exists in the server
+    let _ = client
         .remove_peer(model::aimsir::Peer {
             id: peer.clone(),
             ipaddress: "".into(),
@@ -206,7 +207,7 @@ pub async fn del_peer(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to remove peer from the server {}", err.to_string()),
             )
-        })?;
+        });
     metrics
         .db
         .write()
