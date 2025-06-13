@@ -22,6 +22,51 @@ pub struct BackendState {
     pub metrics: Arc<RwLock<HashMap<i32, BackendTag>>>,
     pub db: Arc<RwLock<dyn model::db::Db + Send + Sync>>,
     pub grpc_server: Arc<RwLock<String>>,
+    pub atomic_metrics: Arc<RwLock<HashMap<String, HashMap<String, model::StoreMetric>>>>,
+}
+
+pub async fn get_full_metrics(
+    State(metrics): State<BackendState>,
+) -> Result<String, (StatusCode, String)> {
+    let mut result = String::new();
+    let local_metrics = metrics.atomic_metrics.read().await;
+    for (dst, metric) in &*local_metrics {
+        for (src, store_metric) in metric {
+            if (store_metric.jitter_max > -1.0
+                && store_metric.jitter_min > -1.0
+                && store_metric.jitter_stddev > -1.0)
+                || (store_metric.ts > 0)
+            {
+                let s = format!(
+                    "pl_gauge{{src=\"{}\", dst=\"{}\", service=\"aimsir\"}} {} {}\n",
+                    src, dst, store_metric.pl, store_metric.ts
+                );
+                result = result + &s;
+            }
+            if store_metric.jitter_min > -1.0 {
+                let s = format!(
+                    "jitter_min_gauge{{src=\"{}\", dst=\"{}\", service=\"aimsir\"}} {} {}\n",
+                    src, dst, store_metric.jitter_min, store_metric.ts
+                );
+                result = result + &s;
+            }
+            if store_metric.jitter_max > -1.0 {
+                let s = format!(
+                    "jitter_max_gauge{{src=\"{}\", dst=\"{}\", service=\"aimsir\"}} {} {}\n",
+                    src, dst, store_metric.jitter_max, store_metric.ts
+                );
+                result = result + &s;
+            }
+            if store_metric.jitter_stddev > -1.0 {
+                let s = format!(
+                    "jitter_stddev_gauge{{src=\"{}\", dst=\"{}\", service=\"aimsir\"}} {} {}\n",
+                    src, dst, store_metric.jitter_stddev, store_metric.ts
+                );
+                result = result + &s;
+            }
+        }
+    }
+    Ok(result)
 }
 
 pub async fn get_metrics(
@@ -406,6 +451,7 @@ pub async fn render_results(
     mut db: Box<dyn model::db::Db>,
     reconcile_time: u16,
     output_metrics: Arc<RwLock<HashMap<i32, BackendTag>>>,
+    atomic_metrics: Arc<RwLock<HashMap<String, HashMap<String, model::StoreMetric>>>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let sleep_duration = Duration::from_secs(reconcile_time.into());
     loop {
@@ -423,7 +469,12 @@ pub async fn render_results(
                                 .filter(|x| x.maintenance.unwrap_or(0) != 0)
                                 .map(|x| x.peer_id)
                                 .collect();
-                            let local_metrics = metrics.read().await;
+                            {
+                                let mut atomic_metrics_to_update = atomic_metrics.write().await;
+                                let local_metrics = metrics.read().await;
+                                *atomic_metrics_to_update = local_metrics.clone();
+                            }
+                            let local_metrics = atomic_metrics.read().await;
                             _parse_output_metrics(
                                 &*local_metrics,
                                 peers_with_tags,
@@ -545,6 +596,7 @@ mod tests {
         };
         let metrics = Arc::new(RwLock::new(HashMap::new()));
         metrics.write().await.insert(0, backendtag);
+        let atomic_metrics = Arc::new(RwLock::new(HashMap::new()));
         let db = Arc::new(RwLock::new(
             model::mysql::MysqlDb::new(database_url.to_string())
                 .await
@@ -554,6 +606,7 @@ mod tests {
             metrics: metrics.clone(),
             db,
             grpc_server: Arc::new(RwLock::new("http://127.0.0.1:10000".into())),
+            atomic_metrics: atomic_metrics.clone(),
         };
         let app = Router::new()
             .route("/stats", get(stats))
@@ -585,6 +638,7 @@ mod tests {
         };
         let metrics = Arc::new(RwLock::new(HashMap::new()));
         metrics.write().await.insert(0, backendtag);
+        let atomic_metrics = Arc::new(RwLock::new(HashMap::new()));
         let db = Arc::new(RwLock::new(
             model::mysql::MysqlDb::new(database_url.to_string())
                 .await
@@ -594,6 +648,7 @@ mod tests {
             metrics: metrics.clone(),
             db,
             grpc_server: Arc::new(RwLock::new("http://127.0.0.1:10000".into())),
+            atomic_metrics: atomic_metrics.clone(),
         };
         let app = Router::new()
             .route("/stats/:statid", get(stats_id))
@@ -624,6 +679,7 @@ mod tests {
         };
         let metrics = Arc::new(RwLock::new(HashMap::new()));
         metrics.write().await.insert(0, backendtag);
+        let atomic_metrics = Arc::new(RwLock::new(HashMap::new()));
         let db = Arc::new(RwLock::new(
             model::mysql::MysqlDb::new(database_url.to_string())
                 .await
@@ -633,6 +689,7 @@ mod tests {
             metrics: metrics.clone(),
             db,
             grpc_server: Arc::new(RwLock::new("http://127.0.0.1:10000".into())),
+            atomic_metrics: atomic_metrics.clone(),
         };
         let app = Router::new()
             .route("/stats/:statid", get(stats_id))
@@ -673,10 +730,16 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
         let backendtag = BackendTag {
-            values: HashMap::from([(2, storemetric)]),
+            values: HashMap::from([(2, storemetric.clone())]),
         };
         let metrics = Arc::new(RwLock::new(HashMap::new()));
+        let atomic_metrics = Arc::new(RwLock::new(HashMap::new()));
         metrics.write().await.insert(0, backendtag);
+        {
+            let mut local_atomic_metrics = atomic_metrics.write().await;
+            local_atomic_metrics
+                .insert("0".into(), HashMap::from_iter([("1".into(), storemetric)]));
+        }
         let db = Arc::new(RwLock::new(
             model::mysql::MysqlDb::new(database_url.to_string())
                 .await
@@ -686,6 +749,7 @@ mod tests {
             metrics: metrics.clone(),
             db: db.clone(),
             grpc_server: Arc::new(RwLock::new("http://127.0.0.1:10000".into())),
+            atomic_metrics: atomic_metrics.clone(),
         };
         let app = Router::new()
             .route("/peers", get(peers))
@@ -700,6 +764,7 @@ mod tests {
             .route("/peertags", post(add_peer_tag))
             .route("/peertags/:peer/:tag", delete(del_peer_tag))
             .route("/metrics", get(get_metrics))
+            .route("/fullmetrics", get(get_full_metrics))
             .with_state(backend);
         // Creating new peer
         let new_peer = model::Peer {
@@ -934,6 +999,26 @@ mod tests {
         let _ = local_db.del_tag(1).await;
         let _ = local_db.del_tag(2).await;
         assert_eq!(body, String::from("pl_gauge{src=\"0\", dst=\"2\", service=\"aimsir\"} 5 1\njitter_min_gauge{src=\"0\", dst=\"2\", service=\"aimsir\"} 0 1\njitter_max_gauge{src=\"0\", dst=\"2\", service=\"aimsir\"} 1 1\njitter_stddev_gauge{src=\"0\", dst=\"2\", service=\"aimsir\"} 0.5 1\n"));
+        let request = Request::builder()
+            .method("GET")
+            .uri("/fullmetrics")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(request).await.expect("ERR");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = String::from_utf8(
+            response
+                .into_body()
+                .collect()
+                .await
+                .unwrap()
+                .to_bytes()
+                .iter()
+                .as_slice()
+                .to_vec(),
+        )
+        .unwrap();
+        assert_eq!(body, String::from("pl_gauge{src=\"1\", dst=\"0\", service=\"aimsir\"} 5 1\njitter_min_gauge{src=\"1\", dst=\"0\", service=\"aimsir\"} 0 1\njitter_max_gauge{src=\"1\", dst=\"0\", service=\"aimsir\"} 1 1\njitter_stddev_gauge{src=\"1\", dst=\"0\", service=\"aimsir\"} 0.5 1\n"));
     }
 
     #[tokio::test]

@@ -1,6 +1,6 @@
 use aimsir::backend_manager::{
     add_peer, add_peer_tag, add_tag, del_peer, del_peer_tag, del_tag, disable_peer, enable_peer,
-    get_metrics, peer_tags, peers, render_results, stats, stats_id, tags,
+    get_metrics, peer_tags, peers, render_results, stats, stats_id, tags, get_full_metrics,
 };
 use aimsir::{
     self,
@@ -109,6 +109,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let input_metrics = aimsir_server.get_metrics();
     let parse_db = Box::new(model::mysql::MysqlDb::new(db.clone()).await?);
     let metrics = Arc::new(RwLock::new(HashMap::new()));
+    let atomic_metrics = Arc::new(RwLock::new(HashMap::new()));
     let reconcile_time: u16 = 60;
 
     let server = AimsirServiceServer::new(aimsir_server);
@@ -138,14 +139,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/aimsir/api/v1/peertags", post(add_peer_tag))
         .route("/aimsir/api/v1/peertags/:peer/:tag", delete(del_peer_tag))
         .route("/metrics", get(get_metrics))
+        .route("/fullmetrics", get(get_full_metrics))
         .with_state(BackendState {
             metrics: metrics.clone(),
             db: Arc::new(RwLock::new(model::mysql::MysqlDb::new(db).await?)),
             grpc_server: Arc::new(RwLock::new(format!("http://{}", node_ip))),
+            atomic_metrics: atomic_metrics.clone(),
         })
         .layer(cors); // Add the CORS middleware;
     tokio::spawn(async move {
-        let _ = render_results(input_metrics, parse_db, reconcile_time, metrics).await;
+        let _ = render_results(input_metrics, parse_db, reconcile_time, metrics, atomic_metrics).await;
     });
     let listener = TcpListener::bind(web_ip).await.unwrap();
     axum::serve(listener, web_app).await.unwrap();
