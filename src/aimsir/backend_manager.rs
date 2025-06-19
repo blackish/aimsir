@@ -398,17 +398,23 @@ fn _parse_output_metrics(
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64;
-    for (key, metric) in local_metrics {
-        let dst = key;
-        if maintenance_peers.contains(dst) {
+    for (dst, metric) in local_metrics {
+        let dst_level = peers_with_tags.get(dst);
+        // If we receive a metric for already deleted peer or for peer in maintenance, ignore it
+        if maintenance_peers.contains(dst) || dst_level.is_none() {
             continue;
         }
+        let dst_level = dst_level.unwrap();
         for (src, vals) in metric {
+            // If we receive a metric for already deleted peer or for peer in maintenance, ignore it
             if maintenance_peers.contains(src) {
                 continue;
             }
-            let src_level = peers_with_tags[src].clone();
-            let dst_level = peers_with_tags[dst].clone();
+            let src_level = peers_with_tags.get(src);
+            if src_level.is_none() {
+                continue;
+            }
+            let src_level = src_level.unwrap();
             for level in src_level {
                 if let Some(src_id) = level.id {
                     // if let Some(dst_tag) = dst_level.iter().find(|x| level.parent == x.parent && level.id != x.id) {
@@ -1056,6 +1062,11 @@ mod tests {
                 name: "peer1".into(),
                 maintenance: None,
             },
+            model::Peer {
+                peer_id: "2".into(),
+                name: "peer2".into(),
+                maintenance: None,
+            }
         ];
         let peer_tags: Vec<model::PeerTag> = vec![
             model::PeerTag {
@@ -1119,6 +1130,7 @@ mod tests {
         let mut result_peer_with_tags: HashMap<String, Vec<model::Tag>> = HashMap::new();
         result_peer_with_tags.insert("0".into(), vec![tags[0].clone(), tags[2].clone()]);
         result_peer_with_tags.insert("1".into(), vec![tags[0].clone(), tags[3].clone()]);
+        result_peer_with_tags.insert("2".into(), Vec::new());
         assert_eq!(result_peer_with_tags, peers_with_tags);
     }
     #[tokio::test]
