@@ -26,7 +26,7 @@ use tower_http::cors::{Any, CorsLayer};
 // #[rocket::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = clap::Command::new("aimsir-server")
-        .version("0.0.1")
+        .version("0.2.2")
         .arg(
             clap::arg!(ip: -p --ip <ip> "node local ip")
                 .required(true)
