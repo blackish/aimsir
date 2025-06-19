@@ -136,6 +136,12 @@ pub async fn get_metrics(
     Ok(result)
 }
 
+pub async fn healthz(
+    State(_metrics): State<BackendState>,
+) -> Result<(), (StatusCode, String)> {
+    Ok(())
+}
+
 pub async fn stats(
     State(metrics): State<BackendState>,
 ) -> Result<Json<Value>, (StatusCode, String)> {

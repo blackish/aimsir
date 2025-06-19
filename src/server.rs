@@ -1,6 +1,6 @@
 use aimsir::backend_manager::{
     add_peer, add_peer_tag, add_tag, del_peer, del_peer_tag, del_tag, disable_peer, enable_peer,
-    get_metrics, peer_tags, peers, render_results, stats, stats_id, tags, get_full_metrics,
+    get_metrics, peer_tags, peers, render_results, stats, stats_id, tags, get_full_metrics, healthz
 };
 use aimsir::{
     self,
@@ -19,6 +19,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
+use tokio::task::JoinSet;
 use tower_http::cors::{Any, CorsLayer};
 
 #[tokio::main]
@@ -111,9 +112,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let metrics = Arc::new(RwLock::new(HashMap::new()));
     let atomic_metrics = Arc::new(RwLock::new(HashMap::new()));
     let reconcile_time: u16 = 60;
+    let mut handles = JoinSet::new();
 
     let server = AimsirServiceServer::new(aimsir_server);
-    tokio::spawn(async move {
+    handles.spawn(async move {
         let _ = tonic::transport::Server::builder()
             .add_service(server)
             .serve(node_ip)
@@ -140,6 +142,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/aimsir/api/v1/peertags/:peer/:tag", delete(del_peer_tag))
         .route("/metrics", get(get_metrics))
         .route("/fullmetrics", get(get_full_metrics))
+        .route("/healthz", get(healthz))
         .with_state(BackendState {
             metrics: metrics.clone(),
             db: Arc::new(RwLock::new(model::mysql::MysqlDb::new(db).await?)),
@@ -147,10 +150,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             atomic_metrics: atomic_metrics.clone(),
         })
         .layer(cors); // Add the CORS middleware;
-    tokio::spawn(async move {
+    handles.spawn(async move {
         let _ = render_results(input_metrics, parse_db, reconcile_time, metrics, atomic_metrics).await;
     });
-    let listener = TcpListener::bind(web_ip).await.unwrap();
-    axum::serve(listener, web_app).await.unwrap();
+    handles.spawn(async move {
+        let listener = TcpListener::bind(web_ip).await.unwrap();
+        axum::serve(listener, web_app).await.unwrap();
+    });
+    handles.join_next().await;
     Ok(())
 }
